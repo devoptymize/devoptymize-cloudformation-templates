@@ -23,7 +23,7 @@ The DevOptymize_CloudFormation_Templates Repository hosts collection of AWS Clou
   - [Load Balancer](./services/lb)
   - [RDS](./services/rds)
   - [Route53](./services/route-53)
-  - [s3](./services/s3)
+  - [S3](./services/s3)
   - [ECR](./services/ecr)
 
 ### Pre-Requisites
