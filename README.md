@@ -1,6 +1,6 @@
 # DevOptymize_CloudFormation_Templates
 
-The DevOptymize_CloudFormation_Templates Repository hosts collection of AWS CloudFormation templates in .j2 format, which can be used to provision individual resources and Blueprints on AWS.
+The DevOptymize_CloudFormation_Templates Repository hosts the collection of AWS CloudFormation templates in .j2 format, which can be used to provision individual resources and blueprints on AWS.
 
 ### Features
 - Ready to use templates, helps in provisioning AWS resource and blueprints effortlessly.
@@ -33,7 +33,7 @@ Pre-requisites to be installed for rendering the templates:
 
 ### Usage
 Once you have the Jinja2 file and the Variable files ready here are the steps to create a stack.
-- To render/parse the cloudofrmation jinja template to yaml use the below command
+- To render/parse the cloudformation jinja template to yaml use the below command
 ``` python3 render-templates.py <input_template_name>.j2 <variables_file_name>.yaml <output_cft_file_name>.yaml```
 - Using the ```aws cloudformation create-stack --stack-name <stack name> --region <Region code> --template-body file://<output_cft_file_name.yaml>``` create the stack for the resource.
 - To delete the cloudformation stack ```aws cloudformation delete-stack --stack-name <stack name> --region <Region code>```
