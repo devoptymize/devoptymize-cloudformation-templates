@@ -3,33 +3,33 @@
 The DevOptymize_CloudFormation_Templates Repository hosts collection of AWS CloudFormation templates in .j2 format, which can be used to provision individual resources and Blueprints on AWS.
 
 ### Features
-- ready to use templates, helps in provisioning AWS resource and blueprints effortlessly.
-- .j2 templating helps in keeping repetetive code snippets in loops and render it out into cloudformation templates dynamically based on the variables provided.
-- ready to use [render-template.py](./render-templates.py) file for ease of rendering .j2 file.
+- Ready to use templates, helps in provisioning AWS resource and blueprints effortlessly.
+- Re-usable.j2 template helps in keeping repetetive code snippets in loops and render it out into cloudformation templates dynamically based on the variables provided.
+- Ready to use [render-template.py](./render-templates.py) file for ease of rendering the .j2 files.
 
-    - Blue prints
-      - [Amazon VPC Configuration Guide](./services/aws-vpc-config)
-      - [AWS DevOps pipeline architecture - CI/CD of Static-website (S3 CDN stack)](./services/aws-cicd-sw)
-      - [AWS DevOps Pipeline architecture - CI/CD for Nodejs backend application](./services/aws-cicd-ms)
+- Blue prints
+  - [Amazon VPC Configuration Guide](./services/aws-vpc-config)
+  - [AWS DevOps pipeline architecture - CI/CD of Static-website (S3 CDN stack)](./services/aws-cicd-sw)
+  - [AWS DevOps Pipeline architecture - CI/CD for Nodejs backend application](./services/aws-cicd-ms)
 
-    - Resources
-      - [Network](./services/network)
-      - [Key Pair](./services/key-pair)
-      - [Security Group](./services/security-group)
-      - [EC2](./services/ec2)
-      - [Launch Template](./services/launch-template)
-      - [ASG](./services/asg)
-      - [Target Group](./services/lb-target-group)
-      - [Load Balancer](./services/lb)
-      - [RDS](./services/rds)
-      - [Route53](./services/route-53)
-      - [s3](./services/s3)
-      - [ECR](./services/ecr)
+- Resources
+  - [Network](./services/network)
+  - [Key Pair](./services/key-pair)
+  - [Security Group](./services/security-group)
+  - [EC2](./services/ec2)
+  - [Launch Template](./services/launch-template)
+  - [ASG](./services/asg)
+  - [Target Group](./services/lb-target-group)
+  - [Load Balancer](./services/lb)
+  - [RDS](./services/rds)
+  - [Route53](./services/route-53)
+  - [s3](./services/s3)
+  - [ECR](./services/ecr)
 
 ### Pre-Requisites
 Pre-requisites to be installed for rendering the templates:
-- make sure python3, jinja2, AWS-cli, jinja-cli is installed.
-- version details of the above mentioned packages are mentioned in the [render-template.py](./render-templates.py).
+- Make sure python3, jinja2, AWS-cli, jinja-cli is installed.
+- Version details of the above mentioned packages are mentioned in the [render-template.py](./render-templates.py).
 
 ### Usage
 Once you have the Jinja2 file and the Variable files ready here are the steps to create a stack.
