@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudFormation Template for creating an ECR repository with a Lifecycle Policy
+
+Parameters:
+  ECRRepoName:
+    Type: String
+    Description: Provide a concise name. A developer should be able to identify the repository contents by the name.
+    Default: {{ecr_repo_name}}
+
+  Region:
+    Type: String
+    Description: Provide a region
+    Default: {{region}}
+
+  RepositoryImageTagMutability:
+    Type: String
+    Description: Enable tag immutability to prevent image tags from being overwritten by subsequent image pushes using the same tag. Disable tag immutability to allow image tags to be overwritten.
+    Default: {{repository_image_tag_mutability}}
+    AllowedValues:
+      - MUTABLE
+      - IMMUTABLE
+
+  RepositoryType:
+    Type: String
+    Description: Select the type of the ECR repo. Can be either a public or private one
+    Default: {{repository_type}}
+    AllowedValues:
+      - public
+      - private
+
+  ScanRepo:
+    Type: String
+    Description: Enable scan on push to have each image automatically scanned after being pushed to a repository. If disabled, each image scan must be manually started to get scan results.
+    Default: {{scan_repo}}
+    AllowedValues:
+    - true
+    - false
+
+  ReadAccessARNs:
+    Type: CommaDelimitedList
+    Description: Select the appropriate users arn who can have read access to ecr repo
+    Default: {{read_access_arns}}
+
+  ReadWriteAccessARNs:
+    Type: CommaDelimitedList
+    Description: Select the appropriate users arn who can have read and write access to ecr repo
+    Default: {{read_write_access_arns}}
+
+  ImageCount:
+    Type: Number
+    Description: Number of most recent images to keep in the ECR repository
+    Default: {{image_count}}  
+
+Conditions:
+  IsScanOnPushEnabled: !Equals [!Ref ScanRepo, true]     
+
+Resources:
+  {% if repository_type == "public" -%}
+  ECRPublicRepositry:
+    Type: AWS::ECR::PublicRepository
+    Properties:
+      RepositoryName: !Ref ECRRepoName
+      RepositoryPolicyText:
+        Version: "2008-10-17"
+        Statement:
+          - Sid: PublicAccess
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:GetAuthorizationToken
+              - ecr:GetRegistryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchCheckLayerAvailability
+  {% else -%}
+  ECRPrivateRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepoName
+      ImageTagMutability: !Ref RepositoryImageTagMutability
+      ImageScanningConfiguration:
+        ScanOnPush: !If [IsScanOnPushEnabled, true, false]
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 30 images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": {{image_count}}
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      RepositoryPolicyText: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowPushPull",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": [
+                  {% for ReadAccessARNs in read_access_arns.split(",") -%}
+                   "{{ ReadAccessARNs.strip() }}" {% if not loop.last %},{% endif %}
+                  {% endfor %}
+                  ]
+              },
+              "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:BatchGetImage",
+                "ecr:DescribeImageScanFindings",
+                "ecr:DescribeImages",
+                "ecr:DescribeRepositories",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:GetLifecyclePolicy",
+                "ecr:GetLifecyclePolicyPreview",
+                "ecr:GetRepositoryPolicy",
+                "ecr:ListImages",
+                "ecr:ListTagsForResource"
+              ]
+            },
+            {
+              "Sid": "AllowPushPull",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": [
+                  {% for ReadWriteAccessARNs in read_write_access_arns.split(",") -%}
+                   "{{ ReadWriteAccessARNs.strip() }}" {% if not loop.last %},{% endif %}
+                  {% endfor %}
+                  ]
+              },
+              "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:BatchGetImage",
+                "ecr:DescribeImageScanFindings",
+                "ecr:DescribeImages",
+                "ecr:DescribeRepositories",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:GetLifecyclePolicy",
+                "ecr:GetLifecyclePolicyPreview",
+                "ecr:GetRepositoryPolicy",
+                "ecr:ListImages",
+                "ecr:ListTagsForResource"
+              ]
+            }
+          ]
+        }
+
+  {% endif %}              
+
+
+

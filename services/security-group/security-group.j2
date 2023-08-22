@@ -1,0 +1,47 @@
+Parameters:
+  SecurityGroupName:
+    Description: Security Group Name
+    Type: String
+    Default: {{ security_group_name }}
+  SecurityGroupDescription:
+    Description: Security Group Description
+    Type: String
+    Default: {{ description }}
+  VpcId:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+    Default: {{ vpc_id }}
+  Region:
+    Description: AWS region
+    Type: String
+    Default: {{ region }}
+  ingressrules:
+    Description: List of ingress rules
+    Type: CommaDelimitedList
+    Default: "{{ ingress_rules }}"
+
+Resources:
+  SecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Ref SecurityGroupName
+      GroupDescription: !Ref SecurityGroupDescription
+      VpcId: !Ref VpcId
+
+  {% set ingressrules_list = ingress_rules.split(';') -%}
+  {% for ingressrule in ingressrules_list -%}
+  {% set rule_parts = ingressrule.split(',') -%}
+    SecurityGroupIngress{{ loop.index }}:
+      Type: "AWS::EC2::SecurityGroupIngress"
+      Properties:
+        GroupId: !Ref SecurityGroup
+        IpProtocol: "{{ rule_parts[1].strip() }}"
+        FromPort: {{ rule_parts[0].strip() }}
+        ToPort: {{ rule_parts[0].strip() }}
+        {% if rule_parts[2] != '' -%}
+        CidrIp: "{{ rule_parts[2].strip() }}"
+        {% endif %}
+        {% if rule_parts[3] != '' -%}
+        SourceSecurityGroupId: "{{ rule_parts[3].strip() }}"
+        {% endif %}
+  {% endfor %}

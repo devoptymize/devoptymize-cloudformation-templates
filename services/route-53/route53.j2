@@ -1,0 +1,47 @@
+Parameters:
+  HostedZoneName:
+    Type: String
+    Description: Name of the hosted zone (e.g., example.com)
+    Default: {{ hostedzonename }}
+
+  vpcid:
+    Type:  List<String>
+    Description: IDs of the VPCs in which to create the hosted zone
+    {% if route53_vpcid %}
+    Default: {{ route53_vpcid | join(",") }}
+    {% else %}
+    Default: 'NONE'
+    {% endif %}
+
+  VpcRegion:
+    Type: String
+    Description: AWS Region where the VPCs are located
+    Default: {{ region }}
+
+Resources:
+  {% if route53_vpcid %}
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref HostedZoneName
+      HostedZoneConfig:
+        Comment: Private hosted zone
+      VPCs:
+        {% for x in route53_vpcid -%}
+        - VPCId: {{ x }}
+          VPCRegion: !Ref VpcRegion
+        {% endfor %}
+      HostedZoneTags:
+        - Key: Name
+          Value: !Ref HostedZoneName
+  {% else %}
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref HostedZoneName
+      HostedZoneConfig:
+        Comment: Public hosted zone
+      HostedZoneTags:
+        - Key: Name
+          Value: !Ref HostedZoneName
+  {% endif -%}

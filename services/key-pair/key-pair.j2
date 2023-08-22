@@ -1,0 +1,20 @@
+Parameters:
+  KeyName:
+    Type: String
+    Description: Name of the keypair to create
+    Default: {{ key_pair_name }}
+
+Resources:
+  KeyPair:
+    Type: 'AWS::EC2::KeyPair'
+    Properties:
+      KeyName: !Ref KeyName
+Outputs:
+  KeyPairName:
+    Value: !Ref KeyPair
+
+  KeyPairFingerprint:
+    Value: !GetAtt KeyPair.KeyFingerprint
+
+  KeyPairKeyId:
+    Value: !GetAtt KeyPair.KeyPairId

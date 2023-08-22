@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for AWS CodePipeline .
+
+Parameters:
+  Environment:
+    Type: String
+    Description: The name of the env in which we need to provision the resources.
+    Default: {{environment}}
+  StackName:
+    Type: String
+    Description: This name will be added as a prefix to all the resource names.
+    Default: {{stack_name}}
+  RepoName:
+    Type: String
+    Description: Name of the AWS CodeCommit repository where your application source code is stored.
+    Default: {{repository_name}}
+  BranchName:
+    Type: String
+    Description: Name of the branch in the CodeCommit repository that will be monitored for changes.Whenever changes are pushed to this branch, the pipeline will automatically start.
+    Default: {{branch_name}}
+  ComputeType:
+    Type: String
+    Description: The type of compute environment. This determines the number of CPU cores and memory the build environment uses.
+    Default: {{compute_type}}
+  Image:
+    Type: String
+    Description: The image tagthat identifies the Docker image to use for this build project.
+    Default: {{image}}
+  Type:
+    Type: String
+    Description: The type of build environment to use for related builds.
+    Default: {{type}}
+  Emails:
+    Type: CommaDelimitedList
+    Description: Email address to receive notifications via SNS
+    Default: "{{ emails | join (', ') }}"
+
+
+Resources:
+  PipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-${StackName}-ServiceRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      # Add other policies/permissions as needed
+      Policies:
+        - PolicyName: !Sub '${Environment}-${StackName}-AWSCodePipelineFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'codepipeline:*'
+                Resource: '*'
+        - PolicyName: !Sub '${Environment}-${StackName}-AWSCodeCommitFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'codecommit:*'
+                Resource: '*'
+              - Effect: Allow
+                Action: 's3:*'  # Add any other S3 actions you need here
+                Resource: '*'
+        - PolicyName: !Sub '${Environment}-${StackName}-AWSCodeBuildStartBuild'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'codebuild:StartBuild'
+                Resource: !Sub 'arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/*'
+              - Effect: Allow
+                Action: 'codebuild:BatchGetBuilds'
+                Resource: !Sub 'arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/*'
+        - PolicyName: !Sub '${Environment}-${StackName}-AWSSNSPublishAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'sns:Publish'
+                Resource: !Ref SNSTopic
+        - PolicyName: !Sub '${Environment}-${StackName}-AWSCodeStarNotifications'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codestar-notifications:CreateNotificationRule
+                  - codestar-notifications:UpdateNotificationRule
+                Resource: "*"
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-${StackName}-CodeBuildService'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub '${Environment}-${StackName}-AWSCodeBuildFullAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'codebuild:*'
+                Resource: '*'
+              - Effect: Allow
+                Action: 'codecommit:*'
+                Resource: '*'
+              - Effect: Allow
+                Action: 's3:*'
+                Resource: '*'  # Add full access to all S3 resources
+              - Effect: Allow
+                Action: 'codedeploy:*'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+              - Effect: Allow
+                Action: 'logs:PutLogEvents'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:log-stream:*'
+              - Effect: Allow
+                Action: 'ecr:*'  # Full ECR permissions
+                Resource: '*'
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub '${Environment}-${StackName}-artifact-bucket'
+  CodeCommitRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Ref RepoName
+      RepositoryDescription: !Sub 'repository for ${Environment}-${StackName}'
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${Environment}-${StackName}-CodebuildProject'
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE  # Output artifact of the Build stage
+      Environment:
+        ComputeType:  !Ref ComputeType
+        Image:  !Ref Image
+        PrivilegedMode: true
+        Type: !Ref Type
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${Environment}-${StackName}-Pipeline'
+      RoleArn: !GetAtt PipelineServiceRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              Configuration:
+                RepositoryName: !Ref RepoName
+                BranchName: !Ref BranchName
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: SourceArtifact
+
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: SourceArtifact  # Input artifact of the Build stage
+              OutputArtifacts:
+                - Name: BuildArtifact  # Output artifact of the Build stage
+              RunOrder: 1
+
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+
+  # New SNS Topic Resource
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub '${Environment}-${StackName}-sns-CodePipeline Notifications'
+      TopicName: !Sub '${Environment}-${StackName}-CodePipelineNotifications'
+  SNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - Ref: SNSTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codestar-notifications.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SNSTopic
+  # New SNS Subscription Resource
+  {% for i in emails %}
+  SNSSubscription{{ loop.index }}:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !Select [ {{ loop.index - 1 }}, !Ref Emails ]
+      Protocol: "email"
+      TopicArn: !Ref SNSTopic
+  {% endfor %}
+  MyCodeStarNotificationRule:
+    Type: "AWS::CodeStarNotifications::NotificationRule"
+    Properties:
+      Name: !Sub '${Environment}-${StackName}-MyCodePipelineNotificationRule'
+      EventTypeIds:
+        - codepipeline-pipeline-action-execution-succeeded
+        - codepipeline-pipeline-action-execution-failed
+      DetailType: FULL
+      Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
+      Targets:
+        - TargetAddress: !Ref SNSTopic
+          TargetType: SNS
+Outputs:
+  PipelineServiceRoleArn:
+    Description: ARN of the CodePipeline Service Role
+    Value: !GetAtt PipelineServiceRole.Arn

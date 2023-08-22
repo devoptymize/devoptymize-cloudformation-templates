@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudFormation template to create an S3 bucket"
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Default: {{bucket_name}}
+    Description: The name for the S3 bucket
+
+  Policy:
+    Type: CommaDelimitedList
+    Default: {{bucket_policy}}
+    Description: The bucket policy rules in JSON format 
+
+  BucketKeyEnabled:
+    Type: String
+    Default: {{bucket_key_enabled}}
+    AllowedValues: 
+    - true
+    - false
+    Description: Specify whether to use an S3 Bucket Key for encryption.
+
+
+Resources:
+  S3Bucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Ref S3BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+      VersioningConfiguration:
+        Status: "Enabled"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+
+  BucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        {% set xyz = bucket_policy.split(',') -%}
+        {% set x = xyz | length -%}
+        {% set i = 1 -%}
+        Statement:
+          - Effect: {{ xyz[0].strip() }}
+            Principal:
+              AWS:
+                {% for i in range (0, x) -%}
+                {% set i = i + 1 -%}
+                {% if 'arn:aws:iam' in xyz[i] -%}
+                - {{ xyz[i].strip() }}
+                {% endif -%}
+                {% endfor %}
+            Action:
+              {% for i in range (0, x) -%}
+              {% set i = i + 1 -%}
+              {% if 's3:' in xyz[i] -%}
+              - '{{ xyz[i].strip() }}'
+              {% endif -%}
+              {% endfor %}
+            Resource:
+              Fn::Join:
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref S3Bucket
+                  - '/*'

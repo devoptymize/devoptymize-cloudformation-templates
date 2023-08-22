@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name
+    Default: "{{ environment }}"
+  Region:
+    Type: String
+    Description: AWS Region
+    Default: "{{ region }}"
+  RdsName:
+    Type: String
+    Description: The name of the RDS instance
+    Default: "{{ rds_name }}"
+  RdsStorage:
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '20'
+    MaxValue: '16384'
+    Default: "{{ rds_storage }}"
+    ConstraintDescription: Must be between 20 and 16384Gb.
+  EngineType:
+    Type: String
+    Description: The database engine to use
+    Default: "{{ engine_type }}"
+  EngineVersion:
+    Type: String
+    Description: The engine version to use
+    Default: "{{ engine_version }}"
+  DbInstanceClass:
+    Type: String
+    Description: The instance type of the RDS instance
+    Default: "{{ db_instance_class }}"
+  DbMasterUsername:
+    Type: String
+    Description: Username for the master DB user
+    Default: "{{ db_master_username }}"
+  DbMasterPassword:
+    Type: String
+    Description: Password for the master DB user
+    Default: "{{ db_master_password }}"
+    NoEcho: true
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The ID of the VPC to deploy the RDS instance in
+    Default: "{{ vpc_id }}"
+  SecurityGroupId:
+    Type: String
+    Description: The ID of the VPC security group to associate with the RDS instance
+    Default: "{{ security_group_id }}"
+  MultiAzDeployment:
+    Type: String
+    Description: Specifies if the RDS instance is multi-AZ
+    Default: "{{ multi_az_deployment }}"
+  PublicAccess:
+    Type: String
+    Description: Specifies if the RDS instance is publicly accessible
+    Default: "{{ public_access }}"
+  SubnetName:
+    Description: Subnet name
+    Type: String
+    Default: "{{ subnet_name }}"
+  SubnetGroup:
+    Type: String
+    Description: Name of the DB subnet group. The DB instance will be created in the VPC associated with the DB subnet group. If unspecified, it will be created in the default VPC
+    Default: "{{ subnet_group }}"
+  ParameterGroup:
+    Type: String
+    Description: Name of the DB parameter group to associate or create
+    Default: "{{ parameter_group }}"
+  ParameterGroupNew:
+    Type: String
+    Description: New parameter group
+    Default: "{{ parameter_group_new }}"
+  OptionGroup:
+    Type: String
+    Description: Name of the option group
+    Default: "{{ option_group }}"
+  OptionGroupNew:
+    Type: String
+    Description: A list of options to apply
+    Default: "{{ option_group_new }}"
+  Encryption:
+    Type: String
+    Description: RDS storage encryption. Master key IDs and aliases appear in the list after they have been created using the AWS Key Management Service console
+    Default: "{{ encryption }}"
+  LogExports:
+    Type: String
+    Description: Select 'yes' if you need to export logs to CloudWatch
+    Default: "{{ log_exports }}"
+
+Conditions:
+  IsMultiAzDeployment: !Equals [!Ref MultiAzDeployment, 'yes']
+  IsPublicAccess: !Equals [!Ref PublicAccess, 'yes']
+  IsEncryptionRequired: !And
+    - !Not [!Equals [!Ref Encryption, 'null']]
+    - !Not [!Equals [!Ref EngineType, 'sqlserver-ex']]
+  IsLogExportEnabled: !Equals [!Ref LogExports, 'yes']
+  IsOracleEngine: !Equals [!Ref EngineType, 'oracle-se2']
+  IsMariaDBEngine: !Equals [!Ref EngineType, 'mariadb']
+  IsMySQLEngine: !Equals [!Ref EngineType, 'mysql']
+  IsPostgresEngine: !Equals [!Ref EngineType, 'postgres']
+  IsSqlServerEngine: !Equals [!Ref EngineType, 'sqlserver-ex']
+  IsMultiOptionGroup: !Not [!Equals [!Ref OptionGroupNew, '']]
+  IsParameterGroupNull: !Equals [!Ref ParameterGroup, 'null']
+  IsOptionGroupNull: !Equals [!Ref OptionGroup, 'null']
+  IsSubnetGroupPresent: !Not [!Equals [!Ref SubnetGroup, 'null']]
+  IsSubnetGroupNull: !Equals [!Ref SubnetGroup, 'null']
+  ShouldEnablePublicAccess: !Or
+    - !Equals [!Ref EngineType, 'mysql']
+    - !Equals [!Ref EngineType, 'postgres']
+    - !Equals [!Ref EngineType, 'sqlserver-ex']
+    - !Equals [!Ref EngineType, 'mariadb']
+    - !Equals [!Ref EngineType, 'oracle-se2']
+
+Resources:
+  RdsInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBInstanceIdentifier: !Ref RdsName
+      Engine: !Ref EngineType
+      EngineVersion: !Ref EngineVersion
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: 7
+      CopyTagsToSnapshot: false
+      AllocatedStorage: !Ref RdsStorage
+      DBInstanceClass: !Ref DbInstanceClass
+      MasterUsername: !Ref DbMasterUsername
+      MasterUserPassword: !Ref DbMasterPassword
+      VPCSecurityGroups:
+        - !Ref SecurityGroupId
+      MultiAZ: !If [IsMultiAzDeployment, 'true', 'false']
+      PubliclyAccessible: !If [IsPublicAccess, 'true', 'false']
+      DBSubnetGroupName: !If
+        - IsSubnetGroupPresent
+        - !If
+          - IsSubnetGroupNull
+          - !Ref SubnetName
+          - !Ref SubnetGroup
+        - !Ref 'AWS::NoValue'
+      {% if EngineType == "sqlserver-ex" -%}
+      StorageEncrypted: !If [IsEncryptionRequired, !If [IsSqlServerEngine, !If [IsKmsKeyProvided, 'true', 'false'], 'false'], 'false']
+      {% endif %}
+      StorageEncrypted: !If [IsEncryptionRequired, 'true', 'false']
+      KmsKeyId: !If [IsEncryptionRequired, !Ref Encryption, !Ref 'AWS::NoValue']
+      OptionGroupName: !If [IsMultiOptionGroup,
+        !If [IsMariaDBEngine, !Sub "mariadb-{{ EngineVersion }}",
+        !If [IsMySQLEngine, !Sub "mysql-{{ EngineVersion }}",
+        !If [IsPostgresEngine, !Sub "postgres-{{ EngineVersion }}",
+        !If [IsSqlServerEngine, !Sub "sqlserver-ex-{{ EngineVersion }}",
+        !If [IsOracleEngine, !Sub "oracle-{{ EngineVersion }}", !Ref 'AWS::NoValue']]]]],
+        !Ref 'AWS::NoValue']
+      EnableCloudwatchLogsExports: !If [IsLogExportEnabled,
+        !If [IsOracleEngine, ['alert', 'audit', 'listener', 'trace'], !Ref 'AWS::NoValue'], !Ref 'AWS::NoValue']
+      LicenseModel: !If [IsOracleEngine, 'license-included', !Ref 'AWS::NoValue']
+      DBParameterGroupName: !If [IsParameterGroupNull, !Ref ParameterGroupNew, !Ref ParameterGroup]
+      OptionGroupName: !If [IsOptionGroupNull, !Ref OptionGroupNew, !Ref OptionGroup]
+      PubliclyAccessible: !If [ShouldEnablePublicAccess, true, false]
+  
+  RdsSecurityGroupIngress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Condition: ShouldEnablePublicAccess
+    Properties:
+      GroupId: !Ref SecurityGroupId
+      IpProtocol: tcp
+      FromPort: 
+        Fn::If:
+          - IsMySQLEngine
+          - 3306  # MySQL and Aurora MySQL use the same port
+          - Fn::If:
+              - IsPostgresEngine
+              - 5432  # PostgreSQL uses port 5432
+              - Fn::If:
+                  - IsOracleEngine
+                  - 1521  # Oracle uses port 1521
+                  - Fn::If:
+                      - IsMariaDBEngine
+                      - 3306  # MariaDB uses port 3306
+                      - 1433  # SQL Server Express uses port 1433
+      ToPort: 
+        Fn::If:
+          - IsMySQLEngine
+          - 3306  # MySQL and Aurora MySQL use the same port
+          - Fn::If:
+              - IsPostgresEngine
+              - 5432  # PostgreSQL uses port 5432
+              - Fn::If:
+                  - IsOracleEngine
+                  - 1521  # Oracle uses port 1521
+                  - Fn::If:
+                      - IsMariaDBEngine
+                      - 3306  # MariaDB uses port 3306
+                      - 1433  # SQL Server Express uses port 1433
+      CidrIp: 0.0.0.0/0
