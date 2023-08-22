@@ -1,6 +1,6 @@
-# DevOptymize_CloudFormation_Templates
+# DevOptymize-CloudFormation-Templates
 
-The DevOptymize_CloudFormation_Templates Repository hosts the collection of AWS CloudFormation templates in .j2 format, which can be used to provision individual resources and blueprints on AWS.
+The devoptymize-cloudformation-templates repository hosts the collection of AWS cloudformation templates in .j2 format, which can be used to provision individual resources and blueprints on AWS.
 
 ### Features
 - Ready to use templates, helps in provisioning AWS resource and blueprints effortlessly.
