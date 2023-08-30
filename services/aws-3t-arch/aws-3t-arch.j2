@@ -1,0 +1,748 @@
+### CLOUDFORMATION SCRIPT FOR CREATING NETWORK STACK ###
+Parameters:
+  Env:
+    Type: String
+    Description: Name of the environment
+    Default: "{{ environment }}"
+  StackName:
+    Description: Name of the stack to create
+    Type: String
+    Default: "{{stack_name}}"
+# Network Part
+  VPCCIDR:
+    Type: String
+    Description: The CIDR range for your VPC
+    Default: "{{ vpc_cidr_range }}"
+  PublicSubnetCIDRs:
+    Type: CommaDelimitedList
+    Description: A list of public subnet CIDR blocks inside the VPC, separated by commas. 
+    Default: "{{ public_subnets | join (', ') }}"
+  PrivateSubnetCIDRs:
+    Type: CommaDelimitedList
+    Description:  A list of private subnet CIDR blocks inside the VPC, separated by commas.
+    Default: "{{ private_subnets | join (', ') }}"
+  DatabaseSubnetCIDRs:
+    Type: CommaDelimitedList
+    Description: A list of database subnet CIDR blocks inside the VPC, separated by commas.
+    Default: "{{ database_private_subnets | join (', ') }}"
+
+  # launch Template & ASG
+  KeyPair:
+    Description: Key name of the Key Pair to use for the instance
+    Type: String
+    Default: {{key_pair}}
+  InstanceType:
+    Description: The type of instance to start
+    Type: String
+    Default: {{instance_type}}
+  AmiId:
+    Description: The ID of the Amazon Machine Image to use for the instance
+    Type: String
+    Default: {{ami_id}}
+  LinuxDeviceName:
+    Description: AWS EBS device names for Linux instances
+    Type: String
+    Default: /dev/sdb
+  WindowsDeviceName:
+    Description: AWS EBS device names for Windows instances
+    Type: String
+    Default: xvdb
+  VolumeSizes:
+    Description: Volume sizes to be attached to the launch template
+    Type: String
+    Default: {{volume_size}}
+  VolumeType:
+    Description: Volume sizes to be attached to the launch template
+    Type: String
+    Default: {{volume_type}}
+  OperatingSystem:
+    Type: String
+    Description: Type of OS 
+    AllowedValues: [linux, windows]
+    Default: {{operatingsystem}}
+  Ingressrules:
+    Description: List of inbount rule
+    Type: CommaDelimitedList
+    Default: "{{ ingressrules }}"
+
+## ASG ##
+  MinimumSize:
+    Description: The minimum number of instances in the Auto Scaling group
+    Type: Number
+    Default: {{ asg_min_size }}
+  MaximumSize:
+    Description: The maximum number of instances in the Auto Scaling group
+    Type: Number
+    Default: {{ asg_max_size }}
+  DesiredCapacity:
+    Description: The desired capacity of the Auto Scaling group
+    Type: Number
+    Default: {{ asg_desired_capacity }}
+
+# Load balancer # 
+  ACMCertificateAlb:
+    Type: String
+    Description: A list of SSL/TLS certificates.
+    Default: {{ acm_certificate_arn_alb }}
+
+  LoadBalancingAction:
+    Description: Choose a load balancer action
+    Type: String
+    Default: Attach_ALB_NLB  
+    
+# Cloudfront #
+  DomainName:
+    Description: The domain name for cloudfront
+    Type: String
+    Default: {{ domain_name }}
+
+  ACMCertificateCloudFront:
+    Type: String
+    Description: A list of SSL/TLS certificates.
+    Default: {{ acm_certificate_arn_cloudfront }}  
+
+# RDS Cluster
+  RdsClusterIdentifier:
+    Description: The name of your DB cluster
+    Type: String
+    Default: "{{ rds_cluster_identifier }}"
+
+  EngineType:
+    Description: Choose the engine type
+    Type: String
+    Default: "{{ engine_type }}"
+
+  EngineVersion:
+    Description: Choose the engine version
+    Type: String
+    Default: "{{ engine_version }}"
+
+  DbMasterUsername:
+    Description: DB master username
+    Type: String
+    Default: "{{ db_master_username }}"
+
+  AllocatedStorage:
+    Description: Allocated storage for the rds
+    Type: Number
+    Default: {{ allocated_storage }}
+
+  DbMasterPassword:
+    Description: DB master password
+    Type: String
+    Default: "{{ db_master_password }}"
+    NoEcho: true
+
+  DbInstanceClass:
+    Description: DB instance class
+    Type: String
+    Default: "{{ db_instance_class }}"
+
+# Route53 Record
+  HostedZoneid:
+    Description: Choose a hosted zone id
+    Type: String
+    Default: {{ hosted_zone_id }}    
+
+Conditions:
+    IsWindows: !Equals [!Ref OperatingSystem, windows] 
+    UseClassicLoadBalancer: !Equals [!Ref LoadBalancingAction, "Attach_Classic_Load_Balancer"]
+
+    ShouldAllocateDbClusterInstanceClass: !Not
+      - !Or
+        - !Equals [!Ref EngineType, "aurora-mysql"]
+        - !Equals [!Ref EngineType, "aurora-postgresql"]
+
+Resources:
+  # VPC creation
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-vpc'
+  # Our VPC will need internet access:
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-igw'
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+## Public Subnetes ##
+  {% for i in public_subnets %}
+  PublicSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PublicSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-public-subnet-{{ loop.index }}'
+  PublicRouteTableAssociation{{ loop.index }}:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref PublicSubnet{{ loop.index }}
+        RouteTableId: !Ref PublicRouteTable
+  {% endfor %}
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+       - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-public-route-table'
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+       - PublicRouteTable
+       - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+## Nat Eip Creation for Public Subnets ##
+{% for i in public_subnets %}
+  NatEIP{{ loop.index }}:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-nat-eip-{{ loop.index }}'
+  NatGateway{{ loop.index }}:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref PublicSubnet{{ loop.index }}
+      AllocationId: !GetAtt NatEIP{{ loop.index }}.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-natgateway-{{ loop.index }}'
+{% endfor %}
+## Private Subnetes ##
+  {% for i in private_subnets %}
+  PrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PrivateSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-private-subnet-{{ loop.index }}'
+  PrivateRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-private-route-table-{{ loop.index }}'
+  PrivateRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - NatGateway{{ loop.index }}
+      - PrivateRouteTable{{ loop.index }}
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway{{ loop.index }}
+  PrivateRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+  {% endfor %}
+## Database Subnets ##
+  {% for i in database_private_subnets %}
+  Databaseprivatesubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref DatabaseSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-db-pvt-subnet-{{ loop.index }}'
+  DatabaseRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-db-pvt-route-table-{{ loop.index }}'
+  DatabaseRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Databaseprivatesubnet{{ loop.index }}
+      RouteTableId: !Ref DatabaseRouteTable{{ loop.index }}
+  {% endfor %}
+
+
+## Security Groups For Launch Template##
+  FrontendSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Sub '${Env}-${StackName}-frntnd-sg'
+      GroupDescription: !Sub '${Env}-${StackName}-frntnd-sg'
+      VpcId: !Ref VPC
+  FrontendSecurityGroupInboundRulehttp:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !GetAtt FrontendSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !GetAtt FrontendALBSecurityGroup.GroupId 
+
+  BackendSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Sub '${Env}-${StackName}-bcknd-sg'
+      GroupDescription: !Sub '${Env}-${StackName}-bcknd-sg'
+      VpcId: !Ref VPC
+  BackendSecurityGroupInboundRulehttp:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !GetAtt BackendSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !GetAtt BackendALBSecurityGroup.GroupId 
+
+## Security Groups For Public App Load Balancer##
+  FrontendALBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Sub '${Env}-${StackName}-frntnd-lb-sg'
+      GroupDescription: !Sub '${Env}-${StackName}-frntnd-lb-sg'
+      VpcId: !Ref VPC
+  {% set ingressrules_list = ingressrules.split(';') -%}
+  {% for ingressrule in ingressrules_list -%}
+  {% set rule_parts = ingressrule.split(',') -%}
+    FrontendSecurityGroupIngress{{ loop.index }}:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      GroupId: !Ref FrontendALBSecurityGroup
+      IpProtocol: "{{ rule_parts[1].strip() }}"
+      FromPort: {{ rule_parts[0].strip() }}
+      ToPort: {{ rule_parts[0].strip() }}
+      {% if rule_parts[2] != '' -%}
+      CidrIp: "{{ rule_parts[2].strip() }}"
+      {% endif %}
+  {% endfor %}
+  
+## Security Groups For Private App Load Balancer##
+  BackendALBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Sub '${Env}-${StackName}-bcknd-lb-sg'
+      GroupDescription: !Sub '${Env}-${StackName}-bcknd-lb-sg'
+      VpcId: !Ref VPC
+  {% set ingressrules_list = ingressrules.split(';') -%}
+  {% for ingressrule in ingressrules_list -%}
+  {% set rule_parts = ingressrule.split(',') -%}
+    BackendSecurityGroupIngress{{ loop.index }}:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      GroupId: !Ref BackendALBSecurityGroup
+      IpProtocol: "{{ rule_parts[1].strip() }}"
+      FromPort: {{ rule_parts[0].strip() }}
+      ToPort: {{ rule_parts[0].strip() }}
+      {% if rule_parts[2] != '' -%}
+      CidrIp: "{{ rule_parts[2].strip() }}"
+      {% endif %}
+  {% endfor %}
+
+## Security Groups For RDS ##
+  RdsSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Sub ${Env}-${StackName}-rds-sg
+      GroupDescription: !Sub ${Env}-${StackName}-rds-sg
+      VpcId: !Ref VPC
+  RDSSecurityGroupInboundRule:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !GetAtt RdsSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !GetAtt BackendSecurityGroup.GroupId 
+  
+  TargetGroupBackend:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${Env}-${StackName}-tg-bcknd'
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      HealthCheckEnabled: true
+      HealthCheckPath: /healthcheck
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-299
+      TargetType: instance
+
+  TargetGroupFrontend:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${Env}-${StackName}-tg-frntnd
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      HealthCheckEnabled: true
+      HealthCheckPath: /healthcheck
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200-299
+      TargetType: instance
+
+## Load balancer Resource For Pubilc Application##
+  FrontendLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - InternetGatewayAttachment
+      {% for i in public_subnets -%}
+      - PublicSubnet{{ loop.index }}  
+      {% endfor %}
+      - TargetGroupFrontend
+    Properties:
+      Name:  !Sub ${Env}-${StackName}-frntnd-lb
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      Subnets:
+        {% for i in public_subnets -%}
+        - !Ref PublicSubnet{{ loop.index }}  # Add the reference to PublicSubnet1
+        {% endfor %}
+      SecurityGroups: 
+        - !Ref FrontendALBSecurityGroup
+  ListenerAlbFrontendHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref FrontendLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-2016-08
+      Certificates:
+        - CertificateArn: !Ref ACMCertificateAlb
+      DefaultActions:
+        - Order: 1
+          Type: forward
+          TargetGroupArn: !Ref TargetGroupFrontend
+
+  ListenerAlbFrontendHTTP:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+        LoadBalancerArn: !Ref FrontendLoadBalancer
+        Port: 80
+        Protocol: "HTTP"
+        DefaultActions: 
+          - Order: 1
+            RedirectConfig: 
+                Protocol: "HTTPS"
+                Port: "443"
+                Host: "#{host}"
+                Path: "/#{path}"
+                Query: "#{query}"
+                StatusCode: "HTTP_301"
+            Type: "redirect"      
+
+## Load balancer Resource For Private Application ##
+
+  BackendLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - InternetGatewayAttachment
+      {% for i in public_subnets -%}
+      - PublicSubnet{{ loop.index }}  # Add the reference to PublicSubnet1
+      {% endfor %}
+      - TargetGroupBackend
+    Properties:
+      Name:  !Sub ${Env}-${StackName}-bcknd-lb
+      Scheme: internal
+      Type: application
+      IpAddressType: ipv4
+      Subnets:
+        {% for i in public_subnets -%}
+        - !Ref PublicSubnet{{ loop.index }}  
+        {% endfor %}
+      SecurityGroups: 
+        - !Ref BackendALBSecurityGroup
+  ListenerAlbBackendTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref BackendLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref ACMCertificateAlb
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupBackend
+
+  ListenerAlbPvtHTTP:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+        LoadBalancerArn: !Ref BackendLoadBalancer
+        Port: 80
+        Protocol: "HTTP"   
+        DefaultActions: 
+          - Order: 1
+            TargetGroupArn: !Ref TargetGroupBackend
+            Type: "forward"        
+
+## Public Instance Profile Creation ##
+  IAMRoleFrontend:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${Env}-${StackName}-policy-frontend
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - '*'
+                Resource: '*'
+  IAMInstanceProfileFrontend:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${Env}-${StackName}-instance-profile-pub
+      Roles:
+        - !Ref IAMRoleFrontend
+
+## Private Instance Profile Creation ##
+  IAMRoleBackend:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${Env}-${StackName}-policy-bcknd
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - '*'
+                Resource: '*'
+  IAMInstanceProfileBackend:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${Env}-${StackName}-instance-profile-pvt
+      Roles:
+        - !Ref IAMRoleBackend
+
+## Launch Template Public## 
+  LaunchTemplateFrontend: 
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn:
+        - FrontendSecurityGroup
+    Properties:
+      LaunchTemplateName: !Sub ${Env}-${StackName}-lt-frntnd
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPair
+        SecurityGroupIds: 
+          - !Ref FrontendSecurityGroup
+        IamInstanceProfile: 
+          Name: !Ref IAMInstanceProfileFrontend
+        BlockDeviceMappings:
+          - DeviceName: !If [IsWindows, !Ref WindowsDeviceName, !Ref LinuxDeviceName]
+            Ebs:
+              VolumeSize: !Ref VolumeSizes
+              VolumeType: !Ref VolumeType
+
+## Launch Template Private ## 
+  LaunchTemplateBackend: 
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn:
+        - FrontendSecurityGroup
+    Properties:
+      LaunchTemplateName: !Sub ${Env}-${StackName}-lt-bcknd
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPair
+        SecurityGroupIds: 
+          - !Ref FrontendSecurityGroup
+        IamInstanceProfile: 
+          Name: !Ref IAMInstanceProfileBackend
+        BlockDeviceMappings:
+          - DeviceName: !If [IsWindows, !Ref WindowsDeviceName, !Ref LinuxDeviceName]
+            Ebs:
+              VolumeSize: !Ref VolumeSizes
+              VolumeType: !Ref VolumeType
+
+## Autoscaling Group Public ##
+  FrontendAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+        - FrontendLoadBalancer
+        - TargetGroupBackend
+    Properties:
+      AutoScalingGroupName: !Sub ${Env}-${AWS::StackName}-frntnd-asg
+      VPCZoneIdentifier: 
+        {% for i in private_subnets -%}
+        - !Ref PrivateSubnet{{ loop.index }}  
+        {% endfor %}
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplateFrontend
+        Version: 1
+      MinSize: !Ref MinimumSize
+      MaxSize: !Ref MaximumSize
+      DesiredCapacity: !Ref DesiredCapacity
+      LoadBalancerNames:
+        # - !Ref FrontendLoadBalancer
+        - !If
+          - UseClassicLoadBalancer
+          - !Ref FrontendLoadBalancer
+          - !Ref AWS::NoValue
+      TargetGroupARNs:
+          - !Ref TargetGroupBackend
+          - !Ref AWS::NoValue
+
+## Autoscaling Gorup Private ##
+  BackendAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+        - BackendLoadBalancer
+        - TargetGroupFrontend
+    Properties:
+      AutoScalingGroupName: !Sub ${Env}-${StackName}-bcknd-asg
+      VPCZoneIdentifier:
+        {% for i in private_subnets -%}
+        - !Ref PrivateSubnet{{ loop.index }}  
+        {% endfor %} 
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplateBackend
+        Version: 1
+      MinSize: !Ref MinimumSize
+      MaxSize: !Ref MaximumSize
+      DesiredCapacity: !Ref DesiredCapacity
+      LoadBalancerNames:
+        # - !Ref BackendLoadBalancer
+        - !If
+          - UseClassicLoadBalancer
+          - !Ref BackendLoadBalancer
+          - !Ref AWS::NoValue
+      TargetGroupARNs:
+          - !Ref TargetGroupFrontend
+          - !Ref AWS::NoValue
+
+## RDS Cluster ##
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub ${Env}-${StackName}-db-subnetgroup
+      DBSubnetGroupDescription: !Sub ${Env}-${StackName}-db-subnetgroup
+      SubnetIds:
+        # - !Ref Databaseprivatesubnet
+        {% for i in database_private_subnets -%}
+        - !Ref Databaseprivatesubnet{{ loop.index }}  
+        {% endfor %}     
+
+  RdsPostgresCluster:
+    Type: 'AWS::RDS::DBCluster'
+    DependsOn: 
+        - DBSubnetGroup
+    Properties:
+      MasterUsername:
+        Ref: DbMasterUsername
+      MasterUserPassword:
+        Ref: DbMasterPassword
+      Engine:
+        Ref: EngineType
+      EngineVersion: !Ref EngineVersion
+      AllocatedStorage: !Ref AllocatedStorage
+      VpcSecurityGroupIds: [!Ref RdsSecurityGroup]
+      AvailabilityZones:
+        {% for i in database_private_subnets -%}
+        - !Select [ {{ loop.index - 1 }}, !GetAZs ]
+        {% endfor %}
+        
+      DBSubnetGroupName: !Sub ${Env}-${StackName}-db-subnetgroup
+      StorageEncrypted: true
+      StorageType: io1
+      Iops: 1000
+      DBClusterInstanceClass: !If [ShouldAllocateDbClusterInstanceClass, !Ref DbInstanceClass, !Ref "AWS::NoValue"]
+      DBClusterIdentifier: !Ref RdsClusterIdentifier
+
+##### CLOUDFRONT DISTRIBUTION #####
+  CloudFrontDistribution: 
+    Type: "AWS::CloudFront::Distribution"
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt FrontendLoadBalancer.DNSName  # Use the provided load balancer DNS name
+            Id: "FrontendLoadBalancerOrigin"
+            CustomOriginConfig: 
+              OriginProtocolPolicy: "http-only"
+        DefaultCacheBehavior:
+          TargetOriginId: "FrontendLoadBalancerOrigin"
+          ViewerProtocolPolicy: "allow-all"
+          DefaultTTL: 3600
+          AllowedMethods:
+            - "GET"
+            - "HEAD"
+            - "OPTIONS"
+            - "PUT"
+            - "POST"
+            - "PATCH"
+            - "DELETE"
+          CachedMethods:
+            - "GET"
+            - "HEAD"
+          CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # Replace with the default cache policy ID
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificateCloudFront
+          SslSupportMethod: sni-only
+        Enabled: true
+        
+## Route53 Record creation ##
+  RecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneid
+      Name: !Ref DomainName
+      ResourceRecords:
+      - !GetAtt CloudFrontDistribution.DomainName
+      TTL: 600
+      Type: CNAME
