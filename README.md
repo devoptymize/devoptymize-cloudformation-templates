@@ -11,6 +11,7 @@ The devoptymize-cloudformation-templates repository hosts the collection of AWS 
   - [Amazon VPC Configuration Guide](./services/aws-vpc-config)
   - [AWS DevOps pipeline architecture - CI/CD of Static-website (S3 CDN stack)](./services/aws-cicd-sw)
   - [AWS DevOps Pipeline architecture - CI/CD for Nodejs backend application](./services/aws-cicd-ms)
+  - [AWS 3 Tier Architecture - EC2, ALB, RDS, CloudFront](./services/aws-3t-arch)
 
 - Resources
   - [Network](./services/network)
