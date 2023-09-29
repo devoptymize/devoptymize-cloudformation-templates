@@ -1,0 +1,130 @@
+Parameters:
+  KeyName:
+    Type: String
+    Default: {{ key_pair }}
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the EC2 instance.
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: {{ instance_type }}
+    ConstraintDescription: Please choose a valid instance type.
+
+  AMIID:
+    Description: >-
+      The Latest Amazon Linux 2 AMI taken from the public Systems Manager
+      Parameter Store
+    Type: String
+    Default: {{ ami_id }} 
+
+  RootVolumeSize:
+    Description: The size of the root volume in GB
+    Type: String
+    Default: {{ root_volume_size }}
+
+  ExtraVolumeSize:
+    Description: The size of the root volume in GB
+    Type: String
+    Default: {{ additional_volume_size }}
+
+  RootDeviceNameLin:
+    Description: The device name for the root volume in Linux
+    Type: String
+    Default: /dev/xvda
+
+  RootDeviceNameWin:
+    Description: The device name for the root volume in Linux
+    Type: String
+    Default: /dev/sda1
+
+  WinDeviceNames:
+    Description: The name of the Windows devices.
+    Type: String
+    Default: xvdf
+
+  LinDeviceNames:
+    Description: The name of the Windows devices.
+    Type: String
+    Default: /dev/sdf
+
+  SecurityGroupID:
+    Description: The security group ids to attach to EC2
+    Type: String
+    Default: {{ security_group_id }}
+
+  OperatingSystem:
+    Type: String
+    AllowedValues: [linux, windows]
+    Default: {{ operatingsystem }}
+
+  Region:
+    Description: aws region
+    Type: String
+    Default: {{ region }}
+
+  Environment:
+    Description: aws environment
+    Type: String
+    Default: {{ environment }}
+
+  SubnetId:
+    Description: The VPC Subnet ID to launch in
+    Type: String
+    Default: {{ subnet_id }}
+
+  InstanceName:
+    Description: The name of the Ec2 instance
+    Type: String
+    Default: {{ instance_name }}
+
+  AdditionalVolume:
+    Type: String
+    AllowedValues: [yes, no]
+    Default: {{ additional_volume }}
+
+Conditions:
+  IsWindows: !Equals [!Ref OperatingSystem, windows]
+  IsAdditional: !Equals [!Ref AdditionalVolume, yes]
+
+Resources:
+  LinuxInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !Ref AMIID
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref SubnetId      
+      SecurityGroupIds:
+      {% for x in security_group_id.split(",") -%}
+        - {{ x }}
+      {% endfor %}
+      KeyName: !Ref KeyName
+      {% if additional_volume == "Yes" %}
+      BlockDeviceMappings:
+        - DeviceName: !If [IsWindows, !Ref RootDeviceNameWin, !Ref RootDeviceNameLin]
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Sub "${RootVolumeSize}"
+            DeleteOnTermination: 'true'
+            Encrypted: 'true'
+        {% for x in additional_volume_size.split(",") -%}
+        - DeviceName: !If [IsWindows, !Ref WinDeviceNames, !Ref LinDeviceNames]
+          Ebs:
+            VolumeType: gp3
+            Encrypted: 'true'
+            VolumeSize: {{ x }}
+        {% endfor %}
+      {% endif -%}      
+      {% if additional_volume == "No" %}
+      BlockDeviceMappings:
+        - DeviceName: !If [IsWindows, !Ref RootDeviceNameWin, !Ref RootDeviceNameLin]
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Sub "${RootVolumeSize}"
+            DeleteOnTermination: 'true'
+            Encrypted: 'true'
+      {% endif -%}            
+
+
+      Tags:
+        - Key: Name
+          Value: !Ref InstanceName

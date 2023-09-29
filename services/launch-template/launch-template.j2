@@ -1,0 +1,125 @@
+Parameters:
+  Region:
+    Description: The region in which to deploy the launch template
+    Type: String
+    Default: {{region}}
+
+  LaunchTemplateName:
+    Description: Name of a launch template to be created
+    Type: String
+    Default: {{launch_template_name}}
+
+  KeyPair:
+    Description: Name of the Key Pair to be attached to the instance
+    Type: String
+    {% if key_pair == 'null' %}
+    Default: 'None'
+    {% else %}
+    Default: {{ key_pair }}
+    {% endif %}
+
+  InstanceType:
+    Description: The type of instance based on which EC2 will be provisioned
+    Type: String
+    {% if instance_type == 'null' %}
+    Default: 'None'
+    {% else %}
+    Default: {{ instance_type }}
+    {% endif %}
+
+  SecurityGroupIds:
+    Description: The security group IDs to be attached to EC2 instance
+    Type: String
+    {% if security_group_id == "" %}
+    Default: 'None'
+    {% else %}
+    Default: "{{ security_group_id }}"
+    {% endif %}
+
+  IamInstanceProfile:
+    Description: The IAM instance profile to be attached to EC2 Instance
+    Type: String
+    {% if iam_instance_profile == 'null' %}
+    Default: 'None'
+    {% else %}
+    Default: {{ iam_instance_profile }}
+    {% endif %}
+
+  LinuxDeviceName:
+    Description: The list of Linux device names for EBS volumes to be attached to the instance
+    Type: String
+    Default: /dev/sdb
+
+  WindowsDeviceName:
+    Description: The list of Windows device names for EBS volumes to be attached to the instance
+    Type: String
+    Default: xvdb
+
+  AmiId:
+    Description: AMI ID to be used in the launch template
+    Type: String
+    {% if ami_id == 'null' %}
+    Default: 'None'
+    {% else %}
+    Default: {{ ami_id }}
+    {% endif %}
+
+  VolumeSizes:
+    Description: Volume sizes to be attached to the launch template
+    Type: String
+    Default: {{volume_size}}
+
+  OperatingSystem:
+    Description: The type of the operating system based on which the EC2 will be provisioned
+    Type: String
+    AllowedValues: [linux, windows]
+    Default: {{operatingsystem}}
+
+  UserData:
+    Description: User data script
+    Type: String
+    Default: |
+      {{ user_data }}
+
+
+Conditions:
+  IsWindows: !Equals [!Ref OperatingSystem, windows]
+  IsAdditional: !Equals [!Ref AmiId, None]
+  IsInstancetypenull: !Equals [!Ref InstanceType, None]
+  IsInstanceprofilenull: !Equals [!Ref IamInstanceProfile, None]
+  Iskeypairnull: !Equals [!Ref KeyPair, None]
+  IsSecuritygroupnull: !Equals [!Ref SecurityGroupIds, None]
+
+Resources:
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Ref LaunchTemplateName
+      LaunchTemplateData:
+        ImageId: !If
+          - IsAdditional
+          - !Ref AWS::NoValue
+          - !Ref AmiId
+        InstanceType: !If
+          - IsInstancetypenull
+          - !Ref AWS::NoValue
+          - !Ref InstanceType
+        KeyName: !If
+          - Iskeypairnull
+          - !Ref AWS::NoValue
+          - !Ref KeyPair
+        SecurityGroupIds: !If
+          - IsSecuritygroupnull
+          - !Ref AWS::NoValue
+          - !Split [",", !Ref SecurityGroupIds]
+        IamInstanceProfile:
+          Name: !If [IsInstanceprofilenull, !Ref AWS::NoValue, !Ref IamInstanceProfile]
+        BlockDeviceMappings:
+          {% for x in volume_size.split(",") -%}
+          - DeviceName: !If [IsWindows, !Ref WindowsDeviceName, !Ref LinuxDeviceName]
+            Ebs:
+              VolumeSize: {{ x }}
+              VolumeType: gp3
+          {% endfor %}
+        UserData: !Base64
+          Fn::Sub: ${UserData}

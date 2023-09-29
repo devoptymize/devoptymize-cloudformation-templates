@@ -1,0 +1,123 @@
+Parameters:
+  TargetGroupName:
+    Type: String
+    Description: Name of the target group
+    Default: "{{ target_group_name }}"
+  PortNumber:
+    Type: Number
+    Description: Port number for the target group
+    Default: "{{ port_number }}"
+    {% if target_type == 'lambda' %}
+    Default: '0'
+    {% else %}
+    Default: {{ port_number }}
+    {% endif %}
+  TargetType:
+    Type: String
+    Description: Type of the target (instance, ip, lambda, etc.)
+    Default: "{{ target_type }}"
+  Protocol:
+    Type: String
+    Description: Protocol type for the target group
+    Default: "{{ protocol_type }}"
+  VpcId:
+    Type: String
+    Description: ID of the VPC
+    Default: "{{ vpc_id }}"
+  Region:
+    Type: String
+    Description: Region for the target group attachment
+    Default: "{{ region }}"
+  IpAddress:
+    Type: CommaDelimitedList
+    Description: IP address for the target group attachment
+    Default: "{{ ip_address }}"
+  ApplicationLoadBalancer:
+    Type: String
+    Description: Application Load Balancer for the target group attachment
+    Default: "{{ application_load_balancer }}"
+  InstanceName:
+    Type: String
+    Description: Name of the instance for the target group attachment
+    Default: "{{ instance_name }}"
+  LambdaFunctionName:
+    Type: String
+    Description: Name of the Lambda function
+    Default: "{{ lambda_function_name }}"
+  Ec2id:
+    Type: CommaDelimitedList
+    Description: Name of the instance
+    Default: "{{ ec2_id  }}"
+  LambdaFunction:
+    Type: String
+    Description: Name of the Lambda function
+    Default: "{{ lambda_function_arn }}"
+
+Conditions:
+  IsInstanceTarget: !Equals [!Ref TargetType, "instance"]
+  IsIpTarget: !Equals [!Ref TargetType, "ip"]
+  IsLambdaTarget: !Equals [!Ref TargetType, "lambda"]
+  IsAlbTarget: !Equals [!Ref TargetType, "alb"]
+
+Resources:
+  {% if target_type == "instance" %}
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Ref TargetGroupName
+      TargetType: !If [IsAlbTarget, "alb", !If [IsLambdaTarget, "lambda", !If [IsIpTarget, "ip", "instance"]]]
+      Port: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref PortNumber]
+      Protocol: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref Protocol]
+      VpcId: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref VpcId]
+      Targets:
+        {% set id = ec2_id.split(',') -%}
+        {% set x = id | length -%}
+        {% set i=0 -%}
+        {% for i in range (-1, x-1) -%}
+        - Id: "{{ id[i].strip() }}"
+        {% set i = i + 1 -%}
+        {% endfor %}
+  {% endif -%}
+  {% if target_type == "ip" %}
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Ref TargetGroupName
+      TargetType: !If [IsAlbTarget, "alb", !If [IsLambdaTarget, "lambda", !If [IsIpTarget, "ip", "instance"]]]
+      Port: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref PortNumber]
+      Protocol: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref Protocol]
+      VpcId: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref VpcId]
+      Targets:
+        {% set id = ip_address.split(',') -%}
+        {% set x = id | length -%}
+        {% set i=0 -%}
+        {% for i in range (-1, x-1) -%}
+        - Id: "{{ id[i].strip() }}"
+        {% set i = i + 1 -%}
+        {% endfor %}  
+  {% endif  %}     
+  {% if target_type == "alb" or target_type == "lambda" %}
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Ref TargetGroupName
+      TargetType: !If [IsAlbTarget, "alb", !If [IsLambdaTarget, "lambda", !If [IsIpTarget, "ip", "instance"]]]
+      Port: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref PortNumber]
+      Protocol: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref Protocol]
+      VpcId: !If [IsLambdaTarget, !Ref "AWS::NoValue", !Ref VpcId]
+      Targets:
+        - Id: !If
+            - IsAlbTarget
+            - !Ref ApplicationLoadBalancer
+            - !If
+              - IsLambdaTarget
+              - !Ref LambdaFunction
+              - !Ref AWS::NoValue
+  {% endif  %}       
+  LambdaPermissionWithLB:
+    Type: AWS::Lambda::Permission
+    Condition: IsLambdaTarget
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      Action: lambda:InvokeFunction
+      Principal: elasticloadbalancing.amazonaws.com

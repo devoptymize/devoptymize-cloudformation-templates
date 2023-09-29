@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for creating an ELB and related resources
+
+Parameters:
+  LoadBalancerName:
+    Type: String
+    Description: The name of the ELB.
+    Default: "{{ loadbalancer_name }}"
+  LoadBalancerType:
+    Type: String
+    Description: The NLB or ALB.
+    Default: "{{ loadbalancer_type }}"
+    AllowedValues:
+      - Application_Load_Balancer
+      - Network_Load_Balancer
+  Actions:
+    Type: String
+    Description: Choose the action.
+    Default: "{{ action }}"
+  LoadBalancerScheme:
+    Type: String
+    Description: Select the scheme type.
+    Default: "{{ scheme }}"
+    AllowedValues:
+      - internet-facing
+      - internal
+  IpAddressType:
+    Type: String
+    Description: Select the IP address type.
+    Default: "{{ ip_address_type }}"
+    AllowedValues:
+      - ipv4
+      - dualstack
+  Region:
+    Type: String
+    Description: AWS region.
+    Default: "{{ region }}"
+  Environment:
+    Type: String
+    Description: AWS environment.
+    Default: "{{ environment }}"
+  SecurityGroupId:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: The ID of the security group for the ELB.
+    Default: "{{ security_group_id }}"
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The ID of the VPC to deploy the ELB in.
+    Default: "{{ vpc_id }}"
+  SubnetList:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Comma-separated list of subnet IDs
+    Default: "{{ subnet_id }}"
+  TargetGroupArn:
+    Type: String
+    Description: ARN of the target group.
+    Default: "{{ target_group_arn }}"
+  Port:
+    Type: String
+    Description: Mention the port number.
+    Default: "{{ port }}"
+  Protocol:
+    Type: String
+    Description: Select the protocol to use.
+    Default: "{{ protocol }}"
+    AllowedValues:
+      - HTTP
+      - HTTPS
+      - TCP
+      - UDP
+  CertificateList:
+    Type: String
+    Description: A list of SSL/TLS certificates.
+    Default: "{{ certificate_list }}"
+  SecurityPolicy:
+    Type: String
+    Description: The security policy for SSL/TLS connections.
+    Default: "{{ security_policy }}"
+Conditions:
+  Use_Application_Load_Balancer: !Equals [!Ref LoadBalancerType, Application_Load_Balancer]
+
+Resources:
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Ref LoadBalancerName
+      Scheme: !Ref LoadBalancerScheme
+      Type: !If
+        - Use_Application_Load_Balancer
+        - application
+        - !Ref LoadBalancerType
+      IpAddressType: !Ref IpAddressType
+      Subnets: !Ref SubnetList
+      {% if protocol == "HTTPS" %}
+      SecurityGroups: !Ref SecurityGroupId
+      {% endif %}
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: !Ref Port
+      Protocol: !Ref Protocol
+      {% if protocol == "HTTPS" %}
+      SslPolicy: !Ref SecurityPolicy
+      Certificates:
+        - CertificateArn: !Ref CertificateList
+      {% endif %}
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupArn

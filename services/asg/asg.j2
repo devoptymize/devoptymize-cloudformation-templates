@@ -1,0 +1,96 @@
+Parameters:
+  Region:
+    Description: aws region
+    Type: String
+    Default: {{ region }}
+
+  AutoScalingGroupName:
+    Description: The Auto scaling group name which needs to be provisioned.
+    Type: String
+    Default: {{ asg_name }}
+
+  SubnetId:
+    Description: The VPC Subnet ID to launch in
+    Type: CommaDelimitedList
+    Default: {{ subnet_id }}
+
+  MinimumSize:
+    Description: The minimum number of instances in the Auto Scaling group
+    Type: Number
+    Default: {{ min_size }}
+
+  MaximumSize:
+    Description: The maximum number of instances in the Auto Scaling group
+    Type: Number
+    Default: {{ max_size }}
+
+  DesiredCapacity:
+    Description: The desired capacity of the Auto Scaling group
+    Type: Number
+    Default: {{ desired_capacity }}
+
+  LaunchTemplateName:
+    Description: The ID of the launch template for the Auto Scaling group
+    Type: String
+    Default: {{ launch_template }}
+
+  LaunchTemplateVersion:
+    Description: The version of the launch template for the Auto Scaling group
+    Type: String
+    Default: "1"
+
+  LoadBalancer:
+    Description: The name of the load balancer
+    Type: String
+    Default: {{ load_balancer }}
+
+  LoadBalancingAction:
+    Description: Choose a load balancer action
+    Type: String
+    Default: {{ load_balancing_action }}
+
+  SnsTopic:
+    Description: The ARN of the SNS topic for notifications
+    Type: String
+    Default: {{ sns_topic }}
+
+Resources:
+  MyAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroupName
+      VPCZoneIdentifier: !Ref SubnetId
+      LaunchTemplate:
+        LaunchTemplateName: !Ref LaunchTemplateName
+        Version: !Ref LaunchTemplateVersion
+      MinSize: !Ref MinimumSize
+      MaxSize: !Ref MaximumSize
+      DesiredCapacity: !Ref DesiredCapacity
+      LoadBalancerNames:
+        - !If
+          - UseClassicLoadBalancer
+          - !Ref LoadBalancer
+          - !Ref AWS::NoValue
+      TargetGroupARNs:
+        - !If
+          - UseALBorNLB
+          - !Ref LoadBalancer
+          - !Ref AWS::NoValue
+
+      NotificationConfigurations:
+        - !If
+          - UseSnsTopic
+          - !Ref AWS::NoValue
+          - NotificationTypes:
+              - "autoscaling:EC2_INSTANCE_LAUNCH"
+              - "autoscaling:EC2_INSTANCE_TERMINATE"
+              - "autoscaling:EC2_INSTANCE_LAUNCH_ERROR"
+              - "autoscaling:EC2_INSTANCE_TERMINATE_ERROR"
+            TopicARN:
+                - !Ref SnsTopic
+
+
+Conditions:
+  UseClassicLoadBalancer: !Equals [!Ref LoadBalancingAction, "Attach_Classic_Load_Balancer"]
+  UseALBorNLB: !Equals [!Ref LoadBalancingAction, "Attach_ALB_NLB"]
+  UseSnsTopic: !Equals [!Ref SnsTopic, ""]

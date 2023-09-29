@@ -1,0 +1,285 @@
+Parameters:
+  StackName:
+    Type: String
+    Default: "{{ stack_name }}"
+  Env:
+    Type: String
+    Default: "{{ environment }}"
+  VPCCIDR:
+    Type: String
+    Default: "{{ vpc_cidr_range }}"
+  PublicSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ public_subnets | join (', ') }}"
+  PrivateSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ private_subnets | join (', ') }}"
+  DatabaseSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ database_private_subnets | join (', ') }}"
+  ServiceName:
+    Type: String
+    Default: "{{ service_name }}"
+  VpcEndpointType:
+    Type: String
+    Default: "{{ vpc_endpoint_type }}"
+  PrivateDnsEnabled:
+    Type: String
+    Default: "{{ private_dns_enabled }}"
+  PeerRegion:
+    Type: String
+    Default: "{{ peer_region }}" 
+  PeerOwnerID:
+    Type: String
+    Default: "{{ peer_owner_id }}"
+  PeerVPCCIDRRange:
+    Type: String
+    Default: "{{ peer_vpc_cidr_range }}"    
+  PeerVpcId:
+    Type: String
+    Default: "{{ peer_vpc_id }}"
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-vpc'
+
+  # Our VPC will need internet access:
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+## Public Subnetes ##
+  {% for i in public_subnets %}
+  PublicSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PublicSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-public-subnet-{{ loop.index }}'
+
+  PublicRouteTableAssociation{{ loop.index }}:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref PublicSubnet{{ loop.index }}
+        RouteTableId: !Ref PublicRouteTable
+  {% endfor %}
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+       - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-public-route-table'
+        
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+       - PublicRouteTable
+       - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+## Nat Eip Creation for Public Subnets ##
+{% for i in public_subnets %}
+  NatEIP{{ loop.index }}:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-nat-eip-{{ loop.index }}'
+
+  NatGateway{{ loop.index }}:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref PublicSubnet{{ loop.index }}
+      AllocationId: !GetAtt NatEIP{{ loop.index }}.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-natgateway-{{ loop.index }}'
+   
+{% endfor %}
+
+## Private Subnetes ##
+  {% for i in private_subnets %}
+  PrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PrivateSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-private-subnet-{{ loop.index }}'
+       
+  PrivateRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable  
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-private-route-table-{{ loop.index }}'
+      
+  PrivateRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - NatGateway{{ loop.index }}  
+      - PrivateRouteTable{{ loop.index }}
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway{{ loop.index }}
+  PrivateRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+  {% endfor %}
+  
+## Database Subnets ##
+  {% for i in database_private_subnets %}
+  Databaseprivatesubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref DatabaseSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-database-private-subnet-{{ loop.index }}'
+      
+  DatabaseRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-database-private-route-table-{{ loop.index }}'
+
+  DatabaseRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Databaseprivatesubnet{{ loop.index }}
+      RouteTableId: !Ref DatabaseRouteTable{{ loop.index }}
+  {% endfor %}
+
+  # VPC Flow Log for the VPC
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt FlowLogDeliveryRole.Arn
+      LogGroupName: !Sub "/vpc/${Env}-${StackName}-vpc-flowLog"
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+
+  # IAM Role for VPC Flow Log Delivery
+  FlowLogDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - vpc-flow-logs.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-flow-log-delivery-role'
+
+  # IAM Policy for VPC Flow Log Delivery
+  FlowLogDeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${Env}-${StackName}-FlowLogDeliveryPolicy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/vpc/${Env}-${StackName}-vpc-flowLog:*"
+      Roles:
+        - !Ref FlowLogDeliveryRole
+
+  VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Ref ServiceName
+      VpcEndpointType: !Ref VpcEndpointType
+      PrivateDnsEnabled: !Ref PrivateDnsEnabled
+
+  VpcPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref VPC
+      PeerVpcId: !Ref PeerVpcId
+      PeerOwnerId: !Ref PeerOwnerID
+      PeerRegion: !Ref PeerRegion
+      Tags:
+        - Key: Side
+          Value: Requester
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-vpc-peering-connection'
+
+  # Public Subnets Peering Route
+  {% for i in public_subnets %}
+  PublicSubnetPeeringRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: !Ref PeerVPCCIDRRange
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+  {% endfor %}
+
+  # Private Subnets Peering Route
+  {% for i in private_subnets %}
+  PrivateSubnetPeeringRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: !Ref PeerVPCCIDRRange
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+  {% endfor %}
+
+  # Database Subnets Peering Route
+  {% for i in database_private_subnets %}
+  DatabaseSubnetPeeringRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DatabaseRouteTable{{ loop.index }}
+      DestinationCidrBlock: !Ref PeerVPCCIDRRange
+      VpcPeeringConnectionId: !Ref VpcPeeringConnection
+  {% endfor %}
