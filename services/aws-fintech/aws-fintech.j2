@@ -1,0 +1,493 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create three VPCs with public, private, and isolated subnets and establish VPC peering connections.
+
+Parameters:
+  VpcCidrBlockProduction:
+    Description: CIDR block for the Production VPC
+    Type: String
+    Default: "{{vpc_production_cidr}}"
+  VpcCidrBlockManagement:
+    Description: CIDR block for the Management VPC
+    Type: String
+    Default: "{{vpc_management_cidr}}"
+  VpcCidrBlockDevelopment:
+    Description: CIDR block for the Development VPC
+    Type: String
+    Default: "{{vpc_development_cidr}}"
+  ProductionPublicSubnetCidr:
+    Description: CIDR block for the Production Public Subnet
+    Type: CommaDelimitedList
+    Default: "{{production_public_cidr | join (', ')}}"
+  ProductionPrivateSubnetCidr:
+    Description: CIDR block for the Production Private Subnet
+    Type: CommaDelimitedList
+    Default: "{{production_private_cidr | join (', ')}}"
+  ProductionIsolatedSubnetCidr:
+    Description: CIDR block for the Production Isolated Subnet
+    Type: CommaDelimitedList
+    Default: "{{production_isolated_cidr | join (', ')}}"
+  ManagementPublicSubnetCidr:
+    Description: CIDR block for the Management Public Subnet
+    Type: CommaDelimitedList
+    Default: "{{management_public_cidr | join (', ')}}"
+  ManagementPrivateSubnetCidr:
+    Description: CIDR block for the Management Private Subnet
+    Type: CommaDelimitedList
+    Default: "{{management_private_cidr  | join (', ')}}"
+  DevelopmentPublicSubnetCidr:
+    Description: CIDR block for the Development Public Subnet
+    Type: CommaDelimitedList
+    Default: "{{development_public_cidr | join (', ')}}"
+  DevelopmentPrivateSubnetCidr:
+    Description: CIDR block for the Development Private Subnet
+    Type: CommaDelimitedList
+    Default: "{{development_private_cidr | join (', ')}}"
+  DevelopmentIsolatedSubnetCidr:
+    Description: CIDR block for the Development Isolated Subnet
+    Type: CommaDelimitedList
+    Default: "{{development_isolated_cidr | join (', ')}}"
+  Region:
+    Description: AWS region where resources will be created
+    Type: String
+    Default: "{{region}}"
+  ClientCidrBlock:
+    Description: cidr block
+    Type: String
+    Default: "{{clientcidrblock}}"
+  ServerCertificateArn:
+    Description: The Amazon Resource Name (ARN) of the server certificate.
+    Type: String
+    Default: "{{server_certification}}"
+  ClientRootCertificateChainArn:
+    Description: The Amazon Resource Name (ARN) of the client's root certificate chain.
+    Type: String
+    Default: "{{clientrootcertificate}}"
+  StackName:
+    Description: The name of your stack which is getting created
+    Type: String
+    Default: "{{ stack_name }}"
+
+
+
+Resources:
+  ProductionVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlockProduction
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-vpc
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: ProductionVPC
+    Properties:
+      Tags:
+       - Key: Name
+         Value: !Sub ${StackName}-prod-igw
+
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ProductionVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  ## Public Subnetes ##
+  {% for i in production_public_cidr %}
+  ProductionPublicSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ProductionVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref ProductionPublicSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-public-subnet-{{ loop.index }}
+  ProductionPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+       - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref ProductionVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-public-RouteTable
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+       - ProductionPublicRouteTable
+       - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref ProductionPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  ProductionPublicRouteTableAssociation{{ loop.index }}:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref ProductionPublicSubnet{{ loop.index }}
+        RouteTableId: !Ref ProductionPublicRouteTable
+  {% endfor %}
+  ## Nat Eip Creation for Public Subnets ##
+{% for i in production_public_cidr %}
+  NatEIP{{ loop.index }}:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-NatEIP-{{ loop.index }}
+  NatGateway{{ loop.index }}:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref ProductionPublicSubnet{{ loop.index }}
+      AllocationId: !GetAtt NatEIP{{ loop.index }}.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-NatGateway-{{ loop.index }}
+{% endfor %}
+
+
+  {% for i in production_private_cidr %}
+  ProductionPrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ProductionVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref ProductionPrivateSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-privateSubnet-{{ loop.index }}
+  PrivateRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ProductionVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prodPrivate-RouteTable-{{ loop.index }}
+  PrivateRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - NatGateway{{ loop.index }}
+      - PrivateRouteTable{{ loop.index }}
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway{{ loop.index }}
+  PrivateRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ProductionPrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+  {% endfor %}
+
+
+
+  {% for i in production_isolated_cidr %}
+  ProductionIsolatedSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ProductionVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref ProductionIsolatedSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-IsolatedSubnet-{{ loop.index }}
+  {% endfor %}
+  ManagementVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlockManagement
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-mngmnt-vpc
+  InternetGateway1:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: ManagementVPC
+    Properties:
+      Tags:
+       - Key: Name
+         Value: !Sub ${StackName}-mngmnt-igw
+
+
+  InternetGatewayAttachment1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ManagementVPC
+      InternetGatewayId: !Ref InternetGateway1
+
+  ## Public Subnetes ##
+  {% for i in management_public_cidr %}
+  ManagementPublicSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ManagementVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref ManagementPublicSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-mngmnt-PublicSubnet-{{ loop.index }}
+  ManagementPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+       - InternetGatewayAttachment1
+    Properties:
+      VpcId: !Ref ManagementVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-mngmnt-Public-RouteTable
+  ManagementPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+       - ManagementPublicRouteTable
+       - InternetGatewayAttachment1
+    Properties:
+      RouteTableId: !Ref ManagementPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway1
+  ManagementPublicRouteTableAssociation{{ loop.index }}:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref ManagementPublicSubnet{{ loop.index }}
+        RouteTableId: !Ref ManagementPublicRouteTable
+  {% endfor %}
+  ############## FOT NATGATEWAY #######
+  {% for i in management_public_cidr %}
+  ManagementNatEIP{{ loop.index }}:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: ${StackName}-mngmnt-NatEIP-{{ loop.index }}
+  ManagementNatGateway{{ loop.index }}:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref ManagementPublicSubnet{{ loop.index }}
+      AllocationId: !GetAtt ManagementNatEIP{{ loop.index }}.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-mngmnt-NatGateway-{{ loop.index }}
+  {% endfor %}
+
+  {% for i in management_private_cidr %}
+  ManagementPrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ManagementVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref ManagementPrivateSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-mngmnt-PrivateSubnet-{{ loop.index }}
+  ManagementPrivateRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ManagementVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-mngmnt-Private-RouteTable-{{ loop.index }}
+  ManagementPrivateRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - ManagementNatGateway{{ loop.index }}
+      - ManagementPrivateRouteTable{{ loop.index }}
+    Properties:
+      RouteTableId: !Ref ManagementPrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref ManagementNatGateway{{ loop.index }}
+  ManagementPrivateRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ManagementPrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref ManagementPrivateRouteTable{{ loop.index }}
+  {% endfor %}
+  DevelopmentVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlockDevelopment
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-vpc
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: DevelopmentVPC
+    Properties:
+      Tags:
+       - Key: Name
+         Value: !Sub ${StackName}-dev-igw
+
+
+  InternetGatewayAttachment2:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      InternetGatewayId: !Ref InternetGateway2
+
+   ## Public Subnetes ##
+  {% for i in development_public_cidr %}
+  DevelopmentPublicSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref DevelopmentPublicSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-PublicSubnet-{{ loop.index }}
+  DevelopmentPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+       - InternetGatewayAttachment2
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-Public-RouteTable
+  DevelopmentPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+       - DevelopmentPublicRouteTable
+       - InternetGatewayAttachment2
+    Properties:
+      RouteTableId: !Ref DevelopmentPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway2
+  DevelopmentPublicRouteTableAssociation{{ loop.index }}:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref DevelopmentPublicSubnet{{ loop.index }}
+        RouteTableId: !Ref DevelopmentPublicRouteTable
+   {% endfor %}
+   ############## FOT NATGATEWAY #######
+  {% for i in development_public_cidr %}
+  DevelopmentNatEIP{{ loop.index }}:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-NatEIP-{{ loop.index }}
+  DevelopmentNatGateway{{ loop.index }}:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref DevelopmentPublicSubnet{{ loop.index }}
+      AllocationId: !GetAtt DevelopmentNatEIP{{ loop.index }}.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-NatGateway-{{ loop.index }}
+  {% endfor %}
+
+   {% for i in development_private_cidr %}
+  DevelopmentPrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref DevelopmentPrivateSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-PrivateSubnet-{{ loop.index }}
+  DevelopmentPrivateRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-Private-RouteTable-{{ loop.index }}
+  DevelopmentPrivateRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - DevelopmentNatGateway{{ loop.index }}
+      - DevelopmentPrivateRouteTable{{ loop.index }}
+    Properties:
+      RouteTableId: !Ref DevelopmentPrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref DevelopmentNatGateway{{ loop.index }}
+  DevelopmentPrivateRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevelopmentPrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref DevelopmentPrivateRouteTable{{ loop.index }}
+  {% endfor %}
+  {% for i in development_isolated_cidr %}
+  DevelopmentIsolatedSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref DevelopmentIsolatedSubnetCidr ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-IsolatedSubnet-{{ loop.index }}
+  {% endfor %}
+
+  ClientVPNEndpoint:
+    Type: AWS::EC2::ClientVpnEndpoint
+    Properties:
+      ClientCidrBlock: !Ref ClientCidrBlock
+      ConnectionLogOptions:
+        Enabled: false
+      ServerCertificateArn: !Ref ServerCertificateArn
+      AuthenticationOptions:
+        - Type: certificate-authentication
+          MutualAuthentication:
+            ClientRootCertificateChainArn: !Ref ClientRootCertificateChainArn
+      VpcId: !Ref ManagementVPC
+      TagSpecifications:
+        - ResourceType: client-vpn-endpoint
+          Tags:
+            - Key: Name
+              Value: !Sub ${StackName}-mngmnt-ClientVPN
+  ProductionToManagementPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref ProductionVPC
+      PeerVpcId: !Ref ManagementVPC
+      PeerRegion: !Ref Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-prod-to-mngmnt-peering
+  ProductionToManagementRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: !GetAtt ManagementVPC.CidrBlock
+      VpcPeeringConnectionId: !Ref ProductionToManagementPeeringConnection
+
+  ManagementToDevelopmentPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref ManagementVPC
+      PeerVpcId: !Ref DevelopmentVPC
+      PeerRegion: !Ref Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-mngmnt-to-dev-peering
+  ManagementToDevelopmentRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref ManagementPrivateRouteTable1
+      DestinationCidrBlock: !GetAtt DevelopmentVPC.CidrBlock
+      VpcPeeringConnectionId: !Ref ManagementToDevelopmentPeeringConnection
+
+  DevelopmentToProductionPeeringConnection:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      PeerVpcId: !Ref ProductionVPC
+      PeerRegion: !Ref Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${StackName}-dev-to-prod-peering
+  DevelopmentToProductionRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DevelopmentPrivateRouteTable1
+      DestinationCidrBlock: !GetAtt ProductionVPC.CidrBlock
+      VpcPeeringConnectionId: !Ref DevelopmentToProductionPeeringConnection

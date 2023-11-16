@@ -1,0 +1,274 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Template for creating CloudFront distribution (S3 or Load Balancer)
+
+Parameters:
+  DistributionType:
+    Type: String
+    Default: {{distribution_type}}
+    AllowedValues:
+      - "S3"
+      - "Loadbalancer"
+    Description: Choose the distribution type - S3 or Load Balancer
+  
+  UseCustomDomain:
+    Type: String
+    Default: {{use_custom_domain}}
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Set to "true" to use a custom domain (CNAME) for the CloudFront distribution
+
+  S3BucketName:
+    Type: String
+    Description: The name of your S3 bucket (only needed for S3 distribution)
+    {% if distribution_type == "S3" %}
+    Default: {{bucket_name}}
+    {% else %}
+    Default: 'none'
+    {% endif %} 
+
+  LoadBalancerDomainName:
+    Type: String
+    Description: The DNS name of your load balancer (only needed for Load Balancer distribution)
+    {% if distribution_type == "Loadbalancer" %}
+    Default: {{loadbalancer_domainname}}
+    {% else %}
+    Default: 'none'
+    {% endif %} 
+
+  CDNName:
+    Type: String
+    Description: The name of the Cloudfront Distribution
+    Default: {{cdn_name}}
+
+  OACComment:
+    Type: String
+    Description: The comment for the CloudFront Origin Access Identity (OAc).
+    Default: {{oac_name}}
+  
+  OriginShield:
+    Type: String
+    Description: Origin Shield can help reduce the load on your origin.
+    Default: No
+
+  Compress:
+    Type: String
+    Description: Whether you want CloudFront to automatically compress certain files for this cache behavior. If so, specify true; if not, specify false
+    Default: No
+
+  ViewerProtocolPolicy:
+    Type: String
+    Description: The protocol that viewers can use to access the files in the origin
+    Default: redirect-to-https
+
+  AllowedMethods:
+    Type: String
+    Description:  controls which HTTP methods CloudFront processes and forwards to your Amazon S3 bucket or your custom origin
+    Default: {{allowed_http_methods}}
+
+  PriceClass:
+    Type: String
+    Description: The price class that corresponds with the maximum price that you want to pay for CloudFront service.
+    AllowedValues:  
+      - "PriceClass_100"
+      - "PriceClass_200"
+      - "PriceClass_All"
+    Default: {{price_class}}
+
+  DefaultRootObject:
+    Type: String
+    Description: The object that you want CloudFront to request from your origin (for example, index.html)
+    Default: {{default_root_object}}  
+
+  HttpVersion:
+    Type: String
+    Description:  Specify the maximum HTTP version(s) that you want viewers to use to communicate with CloudFront. The default value for new distributions is http1.1
+    Default: {{http_version}}
+
+  Ipv6:
+    Type: String
+    Description: If you want CloudFront to respond to IPv6 DNS requests with an IPv6 address for your distribution, specify true. If you specify false, CloudFront responds to IPv6 DNS requests with the DNS response code NOERROR and with no IP addresses.
+    Default: {{ipv6}}
+
+  ACMECertificateArn:
+    Type: String
+    Description: The Arn of the ACMECertificateArn
+    Default: {{acm_certificate_arn}}
+
+  Aliases:
+    Type: String
+    Description: A complex type that contains information about CNAMEs (alternate domain names)
+    Default: {{aliases}}
+
+  Comment:
+    Type: String
+    Description: A comment to describe the distribution. The comment cannot be longer than 128 characters.
+    Default: {{description}}
+
+  WebAclId:
+    Type: String
+    Description: A unique identifier that specifies the AWS WAF web ACL, if any, to associate with this distribution. 
+    {% if webacl_id != "null" %}
+    Default: {{webacl_id}}
+    {% else %}
+    Default: 'None'
+    {% endif %}
+
+
+  OriginPath:
+    Type: String
+    Description: An optional path that CloudFront appends to the origin domain name when CloudFront requests content from the origin.
+    Default: {{origin_path}}
+
+  OriginProtocolPolicy:
+    Type: String
+    Description: Specifies the protocol (HTTP or HTTPS) that CloudFront uses to connect to the origin.
+    {% if distribution_type == "Loadbalancer" %}
+    Default: {{origin_protocol_policy}}
+    {% else %}
+    Default: 'None'
+    {% endif %}
+
+Conditions:
+  IsS3Distribution: !Equals [!Ref DistributionType, "S3"]
+  IsLoadBalancerDistribution: !Equals [!Ref DistributionType, "Loadbalancer"]
+  UseCustomDomainCondition: !Equals [!Ref UseCustomDomain, "true"]  # Define the condition for UseCustomDomain
+  UseACMCertificate: !Not [!Equals [!Ref ACMECertificateArn, ""]]
+  UseCloudFrontDefaultCertificate: !Equals [!Ref ACMECertificateArn, ""]
+  UseIAMCertificate: !Not [!Or [!Condition UseACMCertificate, !Condition UseCloudFrontDefaultCertificate]]
+  Usewebacl: !Not [!Equals [!Ref WebAclId, "None"]]
+
+Resources:
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      VersioningConfiguration:
+        Status: Suspended
+      BucketName: !Sub "cloudfront-${CDNName}-s3-logbucket"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: ObjectWriter
+      Tags:
+        - Key : Purpose
+          Value : for testing
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Description: Default Origin Access Control
+        Name: !Ref OACComment
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront Distribution for S3
+  S3Distribution:
+    Type: "AWS::CloudFront::Distribution"
+    Condition: IsS3Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !Sub "${S3BucketName}.s3.amazonaws.com"  # Use the provided S3 bucket name
+            Id: !Sub "${CDNName}-cloudfront-origin"
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            OriginPath: !Ref OriginPath
+            OriginShield:
+                Enabled: !Ref OriginShield
+        PriceClass: !Ref PriceClass
+        DefaultRootObject: !Ref DefaultRootObject
+        Logging: 
+            Bucket: !Sub "cloudfront-${CDNName}-s3-logbucket.s3.amazonaws.com"  # Use the Logging S3 bucket name
+        HttpVersion: !Ref HttpVersion
+        IPV6Enabled: !Ref Ipv6 
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub "${CDNName}-cloudfront-origin"
+          ViewerProtocolPolicy: !Ref ViewerProtocolPolicy
+          DefaultTTL: 86400
+          Compress: !Ref Compress
+          AllowedMethods:
+            {% for x in allowed_http_methods.split(",") -%}
+            - {{ x }}
+            {% endfor %} 
+          CachedMethods:
+            - "GET"
+            - "HEAD"
+          CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # Replace with the default cache policy ID
+        Enabled: true
+        ViewerCertificate:
+                !If
+                - UseACMCertificate
+                - AcmCertificateArn: !Ref ACMECertificateArn
+                  SslSupportMethod: sni-only
+                - !If
+                    - UseIAMCertificate
+                    - IamCertificateId: "your-iam-certificate-id"
+                    - !Ref "AWS::NoValue"
+        {% if use_custom_domain == "true" %}
+        Aliases: 
+            - !Ref Aliases
+        {% endif -%}  
+        Comment: !Ref Comment
+        WebACLId: 
+                !If
+                - Usewebacl
+                - !Ref WebAclId
+                - !Ref "AWS::NoValue"
+        
+  # CloudFront Distribution for Load Balancer
+  LoadBalancerDistribution:
+    Type: "AWS::CloudFront::Distribution"
+    Condition: IsLoadBalancerDistribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !Ref LoadBalancerDomainName  # Use the provided load balancer DNS name
+            Id: !Sub "${CDNName}-cloudfront-origin"
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginProtocolPolicy: !Ref OriginProtocolPolicy
+            OriginShield:
+                Enabled: !Ref OriginShield
+        PriceClass: !Ref PriceClass
+        DefaultRootObject: !Ref DefaultRootObject
+        Logging: 
+            Bucket: !Sub "cloudfront-${CDNName}-s3-logbucket.s3.amazonaws.com"  # Use the Logging S3 bucket name
+        HttpVersion: !Ref HttpVersion
+        IPV6Enabled: !Ref Ipv6 
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub "${CDNName}-cloudfront-origin"
+          ViewerProtocolPolicy: !Ref ViewerProtocolPolicy
+          DefaultTTL: 3600
+          Compress: !Ref Compress
+          AllowedMethods:
+            {% for x in allowed_http_methods.split(",") -%}
+            - {{ x }}
+            {% endfor %} 
+          CachedMethods:
+            - "GET"
+            - "HEAD"
+          CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6"  # Replace with the default cache policy ID
+        Enabled: true
+        ViewerCertificate:
+                !If
+                - UseACMCertificate
+                - AcmCertificateArn: !Ref ACMECertificateArn
+                  SslSupportMethod: sni-only
+                - !If
+                    - UseIAMCertificate
+                    - IamCertificateId: "your-iam-certificate-id"
+                    - !Ref "AWS::NoValue"
+        {% if use_custom_domain == "true" %}
+        Aliases: 
+            - !Ref Aliases
+        {% endif -%}  
+        Comment: !Ref Comment
+        WebACLId: 
+            !If
+            - Usewebacl
+            - !Ref WebAclId
+            - !Ref "AWS::NoValue"
+

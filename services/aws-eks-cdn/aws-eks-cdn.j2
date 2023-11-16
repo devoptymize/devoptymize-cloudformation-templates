@@ -1,0 +1,533 @@
+Parameters:
+######## Network ############
+
+
+  Region:
+    Description: The region in which to deploy resources
+    Type: String
+    Default: "{{ region }}"
+  StackName:
+    Description: The name of your stack which is getting created
+    Type: String
+    Default: "{{ stack_name }}"
+  Env:
+    Description: The name of your environment for the resources to identify
+    Type: String
+    Default: "{{ environment }}"
+  VPCCIDR:
+    Type: String
+    Default: "{{ vpc_cidr_range }}"
+  PublicSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ public_subnets | join (', ') }}"
+  PrivateSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ private_subnets | join (', ') }}"
+  DatabaseSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ database_private_subnets | join (', ') }}"
+
+
+################# RDS ######################
+
+
+  EngineType:
+    Description: Engine type of your RDS cluster
+    Type: String
+    Default: "{{ engine_type }}"
+
+  EngineVersion:
+    Description: Engine version of your RDS cluster
+    Type: String
+    Default: "{{ engine_version }}"
+
+  DbMasterUsername:
+    Description: DB master username
+    Type: String
+    Default: "{{ db_master_username }}"
+
+  DbMasterPassword:
+    Description: DB master password
+    Type: String
+    Default: "{{ db_master_password }}"
+    NoEcho: true
+
+  DbClusterInstanceClass:
+    Description: DB cluster instance class
+    Type: String
+    Default: "{{ db_instance_class }}"
+
+  RdsStorage:
+    Description: RDS storage
+    Type: Number
+    Default: "{{ rds_storage }}"
+
+################################ EKS ##############################
+
+
+  ClusterVersion:
+    Type: String
+    Default: "{{cluster_version}}"
+    Description: Version of the EKS cluster
+
+  NodeCapacityType:
+    Type: String
+    Default: "{{eks_node_group_capacity_type}}"
+    Description: Capacity type of the instance
+
+  NodeInstanceType:
+    Type: String
+    Default: "{{eks_node_group_instance_type}}"
+    Description: Instance type for the nodes
+
+  EKSNodeDesiredSize:
+    Type: Number
+    Default: "{{eks_node_group_desired_size}}"
+    Description: Desired size of the eks node
+
+  EKSNodeMinSize:
+    Type: Number
+    Default: "{{eks_node_group_min_size}}"
+    Description: minimum size of the eks node
+
+  EKSNodeMaxSize:
+    Type: Number
+    Default: "{{eks_node_group_max_size}}"
+    Description: maximum size of the eks node
+
+
+
+
+#################### S3, Route53, CDN and WAF #######################
+  ACMCertificateArn:
+    Description: arn of the certificate
+    Type: String
+    Default: "{{ acm_certificate_arn }}"
+  AlternateDomain:
+    Description: The alternate domain
+    Type: CommaDelimitedList
+    Default: "{{ cdn_aliases | join (', ') }}"
+  ZoneId:
+    Description: Existing zone Id
+    Type: String
+    Default: "{{ hosted_zone_id }}"
+
+
+
+############################################## Network ######################################################
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value: !Sub '${Env}-${StackName}-vpc'
+
+  # Our VPC will need internet access:
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+    Properties:
+      Tags:
+       - Key: Name
+         Value: !Sub ${Env}-${StackName}-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+## Public Subnetes ##
+  {% for i in public_subnets %}
+  PublicSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PublicSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-Public-Subnet-{{ loop.index }}
+  PublicRouteTableAssociation{{ loop.index }}:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref PublicSubnet{{ loop.index }}
+        RouteTableId: !Ref PublicRouteTable
+  {% endfor %}
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+       - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-Public-Route-Table
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+       - PublicRouteTable
+       - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+## Nat Eip Creation for Public Subnets ##
+{% for i in public_subnets %}
+  NatEIP{{ loop.index }}:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-NatEIP-{{ loop.index }}
+
+  NatGateway{{ loop.index }}:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref PublicSubnet{{ loop.index }}
+      AllocationId: !GetAtt NatEIP{{ loop.index }}.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-NatGateway-{{ loop.index }}
+{% endfor %}
+
+# ## Private Subnetes ##
+  {% for i in private_subnets %}
+  PrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PrivateSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-Private-Subnet-{{ loop.index }}
+  PrivateRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-Private-Route-Table-{{ loop.index }}
+  PrivateRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - NatGateway{{ loop.index }}
+      - PrivateRouteTable{{ loop.index }}
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway{{ loop.index }}
+  PrivateRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+  {% endfor %}
+
+ ## Database Subnetes ##
+  {% for i in database_private_subnets %}
+  DatabasePrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref DatabaseSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-Database-private-Subnet-{{ loop.index }}
+  DatabaseRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-Database-private-Route-Table-{{ loop.index }}
+  DatabaseRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DatabasePrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref DatabaseRouteTable{{ loop.index }}
+  {% endfor %}
+
+
+
+# # # ################################################## RDS ########################################################
+
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub ${Env}-${StackName}-DBSubnetGroup
+      DBSubnetGroupDescription: DB Subnet Group
+      SubnetIds:
+        - !Ref DatabasePrivateSubnet1
+        - !Ref DatabasePrivateSubnet2
+        - !Ref DatabasePrivateSubnet3
+  RdsCluster:
+    Type: "AWS::RDS::DBCluster"
+    DependsOn:
+        - DBSubnetGroup
+    Properties:
+      Engine: !Ref EngineType
+      EngineVersion: !Ref EngineVersion
+      DBClusterIdentifier: !Sub ${Env}-${StackName}-rds
+      MasterUsername: !Ref DbMasterUsername
+      MasterUserPassword: !Ref DbMasterPassword
+      DBSubnetGroupName: !Sub ${Env}-${StackName}-DBSubnetGroup
+      PreferredBackupWindow: "04:00-04:30"
+      PreferredMaintenanceWindow: "mon:05:00-mon:05:30"
+      BackupRetentionPeriod: 7
+      StorageEncrypted: false
+      StorageType: "io1"
+      AllocatedStorage: !Ref RdsStorage
+      Iops: "3000"
+      DBClusterInstanceClass: !Ref DbClusterInstanceClass
+      Tags:
+        - Key: Name
+          Value: !Sub ${Env}-${StackName}-rds
+
+
+
+# ############################################ EKS ###################################################################
+  SsmManagedInstanceCorePolicy:
+   Type: "AWS::IAM::ManagedPolicy"
+   Properties:
+    PolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: "Allow"
+          Action:
+            - "ssm:DescribeInstanceInformation"
+            - "ssmmessages:CreateControlChannel"
+            - "ssmmessages:CreateDataChannel"
+            - "ssmmessages:OpenControlChannel"
+            - "ssmmessages:OpenDataChannel"
+            - "ssm:UpdateInstanceInformation"
+          Resource: "*"
+
+
+  EksSecuritygroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Additional security group for EKS cluster
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - Description: To node 1025-65535
+          IpProtocol: tcp
+          FromPort: 1025
+          ToPort: 1025
+          CidrIp: 0.0.0.0/0
+
+
+        - Description: Allow the pods to communicate with the cluster API Server
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+
+        - Description: Cluster all egress
+          IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+
+
+
+      SecurityGroupIngress:
+        - Description: Node to node all ports/protocols
+          IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+
+
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub ${Env}-${StackName}-eks
+      Version: !Ref ClusterVersion
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !GetAtt EksSecuritygroup.GroupId
+        EndpointPrivateAccess: "true"
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+          - !Ref PrivateSubnet3
+      RoleArn: !GetAtt ClusterRole.Arn
+
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn: Cluster
+    Properties:
+      ClusterName: !Sub ${Env}-${StackName}-eks
+      CapacityType: !Ref NodeCapacityType
+      NodegroupName: !Sub ${Env}-${StackName}-nodegroup
+      NodeRole: !GetAtt NodeInstanceRole.Arn
+      ScalingConfig:
+        DesiredSize: !Ref EKSNodeDesiredSize
+        MinSize: !Ref EKSNodeMinSize
+        MaxSize: !Ref EKSNodeMaxSize
+      Subnets:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
+      InstanceTypes:
+        - !Ref NodeInstanceType
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Env}-${StackName}-ClusterRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSServicePolicy
+
+  NodeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Env}-${StackName}-NodeInstanceRole
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - eks.amazonaws.com
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - !Ref SsmManagedInstanceCorePolicy
+
+
+############################################ S3 and CDN ##########################################################
+
+
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Suspended
+      BucketName: !Sub ${Env}-${StackName}-s3-bucket
+      Tags:
+        - Key : Project
+          Value : !Sub ${Env}-${StackName}-S3Bucket
+        - Key: purpose
+          Value: !Sub S3 Bucket for ${Env}-${StackName}
+        - Key:  CreatedBy
+          Value: !Sub ${Env}-${StackName}
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+  CloudFrontOriginAccessControl:
+    Type: 'AWS::CloudFront::OriginAccessControl'
+    Properties:
+      OriginAccessControlConfig:
+        Description: Default Origin Access Control
+        Name: !Sub ${Env}-${StackName}-access-control
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebCloudfront:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Comment: !Sub CloudFront distribution for ${Env}-${StackName}
+        Origins:
+          - DomainName: !GetAtt S3Bucket.RegionalDomainName
+            Id: !Sub ${Env}-${StackName}-origin
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
+
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub ${Env}-${StackName}-origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        Enabled: true
+        IPV6Enabled: true
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 404
+            ResponsePagePath: /index.html
+          - ErrorCode: 403
+            ResponseCode: 403
+            ResponsePagePath: /index.html
+        PriceClass: PriceClass_All
+        HttpVersion: http2and3
+        DefaultRootObject: index.html
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificateArn
+          SslSupportMethod: sni-only
+        Aliases: !Ref AlternateDomain
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+
+      Tags:
+        - Key: purpose
+          Value: !Sub CF distribution for ${Env}-${StackName}-CF
+        - Key: Project
+          Value: !Sub ${Env}-${StackName}
+
+  BucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontAccess
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebCloudfront}
+            Action: 's3:GetObject'
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref S3Bucket, '/*']]
+
+
+######################################## Route 53 #############################################
+
+  {% for record in cdn_aliases -%}
+  Route53Record{{loop.index}}:
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      Name: {{record}}
+      Type: CNAME
+      TTL: 600
+      ResourceRecords:
+      - !GetAtt WebCloudfront.DomainName
+  {% endfor %}
