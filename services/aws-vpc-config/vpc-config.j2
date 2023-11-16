@@ -2,42 +2,55 @@ Parameters:
   StackName:
     Type: String
     Default: "{{ stack_name }}"
+    Description: "Name of the CloudFormation stack."
   Env:
     Type: String
     Default: "{{ environment }}"
+    Description: "Environment identifier."
   VPCCIDR:
     Type: String
     Default: "{{ vpc_cidr_range }}"
+    Description: "CIDR block for the VPC."
   PublicSubnetCIDRs:
     Type: CommaDelimitedList
     Default: "{{ public_subnets | join (', ') }}"
+    Description: "Comma-delimited list of CIDR blocks for public subnets."
   PrivateSubnetCIDRs:
     Type: CommaDelimitedList
     Default: "{{ private_subnets | join (', ') }}"
+    Description: "Comma-delimited list of CIDR blocks for private subnets."
   DatabaseSubnetCIDRs:
     Type: CommaDelimitedList
     Default: "{{ database_private_subnets | join (', ') }}"
+    Description: "Comma-delimited list of CIDR blocks for database subnets."
   ServiceName:
     Type: String
     Default: "{{ service_name }}"
+    Description: "Name of the service."
   VpcEndpointType:
     Type: String
     Default: "{{ vpc_endpoint_type }}"
+    Description: "Type of VPC endpoint."
   PrivateDnsEnabled:
     Type: String
     Default: "{{ private_dns_enabled }}"
+    Description: "Flag to enable private DNS resolution."
   PeerRegion:
     Type: String
-    Default: "{{ peer_region }}" 
+    Default: "{{ peer_region }}"
+    Description: "Region of the peer VPC."
   PeerOwnerID:
     Type: String
     Default: "{{ peer_owner_id }}"
+    Description: "Owner ID of the peer VPC."
   PeerVPCCIDRRange:
     Type: String
-    Default: "{{ peer_vpc_cidr_range }}"    
+    Default: "{{ peer_vpc_cidr_range }}"
+    Description: "CIDR block range of the peer VPC."
   PeerVpcId:
     Type: String
     Default: "{{ peer_vpc_id }}"
+    Description: "ID of the peer VPC."
 
 Resources:
   VPC:

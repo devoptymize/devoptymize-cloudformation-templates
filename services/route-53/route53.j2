@@ -20,7 +20,7 @@ Parameters:
 
 Resources:
   {% if route53_vpcid %}
-  HostedZone:
+  PrivateHostedZone:
     Type: AWS::Route53::HostedZone
     Properties:
       Name: !Ref HostedZoneName
@@ -35,7 +35,7 @@ Resources:
         - Key: Name
           Value: !Ref HostedZoneName
   {% else %}
-  HostedZone:
+  PublicHostedZone:
     Type: AWS::Route53::HostedZone
     Properties:
       Name: !Ref HostedZoneName

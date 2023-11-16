@@ -1,0 +1,465 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: RDS Cluster configuration for MySQL, PostgreSQL, Aurora-MySQL and Aurora-Postgres
+
+Parameters:
+  RdsClusterIdentifier:
+    Description: The name of your DB cluster
+    Type: String
+    Default: "{{ rds_cluster_identifier }}"
+
+  Action:
+    Description: Select the action
+    Type: String
+    Default: "{{ action }}"
+
+  Credential:
+    Description: Choose credentials
+    Type: String
+    Default: "{{ credential }}"
+
+  Region:
+    Description: Choose the region
+    Type: String
+    Default: "{{ region }}"
+
+  Environment:
+    Description: AWS environment
+    Type: String
+    Default: "{{ environment }}"
+
+  EngineType:
+    Description: Choose the engine type
+    Type: String
+    Default: "{{ engine_type }}"
+
+  EngineVersion:
+    Description: Choose the engine version
+    Type: String
+    Default: "{{ engine_version }}"
+
+  DbMasterUsername:
+    Description: DB master username
+    Type: String
+    Default: "{{ db_master_username }}"
+
+  DbMasterPassword:
+    Description: DB master password
+    Type: String
+    Default: "{{ db_master_password }}"
+    NoEcho: true
+
+  DbInstanceClass:
+    Description: DB instance class
+    Type: String
+    Default: "{{ db_instance_class }}"
+
+  VpcName:
+    Description: Name of the VPC
+    Type: String
+    Default: "{{ vpc_name }}"
+
+  VpcId:
+    Description: The VPC ID
+    Type: String
+    Default: "{{ vpc_id }}"
+
+  SubnetGroup:
+    Description: Subnet group
+    Type: String
+    Default: "{{ subnet_group }}"
+
+  SubnetName:
+    Description: Subnet name
+    Type: String
+    Default: "{{ subnet_name }}"
+
+  SubnetId:
+    Description: Subnets
+    Type: String
+    Default: "{{ subnet_id }}"
+
+  SecurityGroupName:
+    Description: Security group name
+    Type: String
+    Default: "{{ security_group_name }}"
+
+  SecurityGroupId:
+    Description: Security group ID
+    Type: String
+    Default: "{{ security_group_id }}"
+
+  PublicAccess:
+    Description: Public access
+    Type: String
+    Default: "{{ public_access }}"
+  
+  DbInstanceOne:
+    Description: DB instance one
+    Type: String
+    Default: "{{ db_instance_one }}"
+
+  DbInstanceOneCustom:
+    Description: DB instance one custom configuration
+    Type: String
+    Default: "{{ db_instance_one_custom }}"
+
+  DbInstanceTwo:
+    Description: DB instance two
+    Type: String
+    Default: "{{ db_instance_two }}"
+
+  DbInstanceTwoCustom:
+    Description: DB instance two custom configuration
+    Type: String
+    Default: "{{ db_instance_two_custom }}"
+
+  DbInstanceThree:
+    Description: DB instance three
+    Type: String
+    Default: "{{ db_instance_three }}"
+
+  DbInstanceThreeCustom:
+    Description: DB instance three custom configuration
+    Type: String
+    Default: "{{ db_instance_three_custom }}"
+
+  DbClusterInstanceClass:
+    Description: DB cluster instance class
+    Type: String
+    Default: "{{ db_instance_class }}"
+
+  RdsStorage:
+    Description: RDS storage
+    Type: Number
+    Default: "{{ rds_storage }}"
+
+  StorageType:
+    Description: Storage type
+    Type: String
+    Default: "io1"
+
+  Iops:
+    Description: Provisioned IOPS
+    Type: Number
+    Default: "1000"
+
+  Encryption:
+    Description: Encryption
+    Type: String
+    Default: "{{ encryption }}"
+
+  ParameterGroup:
+    Description: Parameter group
+    Type: String
+    Default: "{{ parameter_group }}"
+
+  ParameterGroupNew:
+    Description: New parameter group
+    Type: String
+    Default: "{{ parameter_group_new }}"
+
+  ClusterParameterGroup:
+    Description: Cluster parameter group
+    Type: String
+    Default: "{{ cluster_parameter_group }}"
+
+  ClusterParameterGroupNew:
+    Description: New cluster parameter group
+    Type: String
+    Default: "{{ cluster_parameter_group_new }}"
+
+  EnableStorageAutoscaling:
+    Description: Enable storage auto-scaling
+    Type: String
+    Default: "{{ storage_autoscaling }}"
+ 
+  EnableCloudwatchLogsExports:
+    Description: Enable log exports to CloudWatch
+    Type: String
+    Default: "{{ log_exports }}"
+    AllowedValues: ['Yes', 'No']
+
+  DbParameterFamily:
+    Description: The parameter group family for the RDS cluster
+    Type: String
+    Default: "{{ dbparameter_family }}" 
+
+
+Conditions:
+  # Condition to check if the EngineType is either "mysql" or "postgres"
+  ShouldAllocateStorage: !Or
+    - !Equals [!Ref EngineType, "mysql"]
+    - !Equals [!Ref EngineType, "postgres"]
+
+  # Condition to check if the EngineType is not Aurora MySQL or Aurora PostgreSQL
+  ShouldAllocateIops: !Not
+    - !Or
+      - !Equals [!Ref EngineType, "aurora-mysql"]
+      - !Equals [!Ref EngineType, "aurora-postgresql"]
+
+  # Condition to check if the EngineType is not Aurora MySQL or Aurora PostgreSQL
+  ShouldAllocateDbClusterInstanceClass: !Not
+    - !Or
+      - !Equals [!Ref EngineType, "aurora-mysql"]
+      - !Equals [!Ref EngineType, "aurora-postgresql"]
+
+  # Condition to check if the EngineType is not Aurora MySQL or Aurora PostgreSQL
+  ShouldAllocateStorageType: !Not
+    - !Or
+      - !Equals [!Ref EngineType, "aurora-mysql"]
+      - !Equals [!Ref EngineType, "aurora-postgresql"]
+
+  # Condition to check if the EngineType is not Aurora MySQL or Aurora PostgreSQL
+  ShouldUseDbParameterGroup: !Not
+    - !Or
+      - !Equals [!Ref EngineType, "aurora-mysql"]
+      - !Equals [!Ref EngineType, "aurora-postgresql"]
+
+  # Condition to check if the SubnetName is not empty
+  ShouldUseSubnetName: !Not [!Equals [!Ref SubnetName, ""]]
+
+  # Condition to check if the ParameterGroup is not empty
+  IsNullDbParameterGroup: !Equals [!Ref ParameterGroup, ""]
+
+  # Condition to check if the ClusterParameterGroup is not empty
+  IsNullClusterParameterGroup: !Equals [!Ref ClusterParameterGroup, ""]
+
+  # Condition to check if the SubnetGroup is not empty
+  IsNullSubnetGroup: !Or
+    - !Equals [!Ref SubnetGroup, ""]
+    - !Not [!Condition ShouldUseSubnetName]
+
+  # Condition to check if PublicAccess is set to "Yes"
+  ShouldEnablePublicAccess: !Equals [!Ref PublicAccess, "Yes"]
+
+  # Condition to check if the EngineType is either "mysql" or "aurora-mysql"
+  IsMySQLOrAuroraMySQL: !Or [!Equals [!Ref EngineType, "mysql"], !Equals [!Ref EngineType, "aurora-mysql"]]
+
+  # Condition to check if EnableStorageAutoscaling is set to "yes" for MySQL and PostgreSQL engines
+  EnableStorageAutoscalingCondition: !And
+    - !Or
+      - !Equals [!Ref EngineType, "mysql"]
+      - !Equals [!Ref EngineType, "postgres"]
+    - !Equals [!Ref EnableStorageAutoscaling, "yes"]
+
+  # Condition to check if CloudWatch logs should be enabled
+  ShouldUseCloudWatchLogs: !Not [!Equals [!Ref EnableCloudwatchLogsExports, "No"]]
+
+  # Condition to check if the EngineType is "aurora-postgresql"
+  IsAuroraPostgreSQL: !Equals [!Ref EngineType, "aurora-postgresql"]
+
+  # Condition to check if the EngineType is "postgres"
+  IsPostgreSQL: !Equals [!Ref EngineType, "postgres"]
+
+  # Condition to check if the EngineType is "mysql"
+  IsMySQL: !Equals [!Ref EngineType, "mysql"]
+
+  # Condition to check if the EngineType is "aurora-mysql"
+  IsAuroraMySQL: !Equals [!Ref EngineType, "aurora-mysql"]
+
+  # Condition to check if the EngineType is either "aurora-mysql" or "aurora-postgresql"
+  IsAurora:
+    !Or
+      - !Equals [!Ref EngineType, "aurora-mysql"]
+      - !Equals [!Ref EngineType, "aurora-postgresql"]
+
+  # Instance class for RDS instances for aurora cluster (custom or default)
+  IsCustomDbInstanceOne: !Not [!Equals [!Ref DbInstanceOne, "default"]]
+  IsCustomDbInstanceTwo: !Not [!Equals [!Ref DbInstanceTwo, "default"]]
+  IsCustomDbInstanceThree: !Not [!Equals [!Ref DbInstanceThree, "default"]]
+  
+Resources:
+
+  # DB Subnet Group resource definition
+  DbSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Condition: ShouldUseSubnetName
+    Properties:
+      DBSubnetGroupDescription: "DB subnet group for RDS cluster"
+      SubnetIds: !Split [",", !Ref SubnetId]
+
+  # RDS Cluster resource definition
+  RdsCluster:
+    Type: "AWS::RDS::DBCluster"
+    Properties:
+      # Specifies the RDS engine type (e.g., mysql, postgres, aurora-mysql, aurora-postgresql)
+      Engine: !Ref EngineType
+      # Specifies the version of the engine
+      EngineVersion: !Ref EngineVersion
+      # Identifier for the RDS cluster
+      DBClusterIdentifier: !Ref RdsClusterIdentifier
+      # Master username for the RDS cluster
+      MasterUsername: !Ref DbMasterUsername
+      # Master user password for the RDS cluster (noecho to hide the value in the console)
+      MasterUserPassword: !Ref DbMasterPassword
+      # VPC security group IDs for the RDS cluster
+      VpcSecurityGroupIds: [!Ref SecurityGroupId]
+      # Availability Zones for the RDS cluster array items must be unique
+      AvailabilityZones:
+        - !Sub "${AWS::Region}a"
+        - !Sub "${AWS::Region}b"
+        - !Sub "${AWS::Region}c"
+      # Cluster parameter group for the RDS cluster
+      DBClusterParameterGroupName: !If [IsNullClusterParameterGroup, !Ref ClusterParameterGroupNew, !Ref ClusterParameterGroup]
+      # DB subnet group for the RDS cluster
+      DBSubnetGroupName: !If [ShouldUseSubnetName, !Ref DbSubnetGroup, !Ref SubnetGroup]
+      # Preferred backup window for the RDS cluster
+      PreferredBackupWindow: "04:00-04:30"
+      # Preferred maintenance window for the RDS cluster
+      PreferredMaintenanceWindow: "mon:05:00-mon:05:30"
+      # Backup retention period in days
+      BackupRetentionPeriod: 7
+      # Engine mode for the RDS cluster
+      EngineMode: "provisioned"
+      # Specifies if the storage is encrypted
+      StorageEncrypted: true
+      # Storage type for the RDS cluster (io1 for provisioned IOPS)
+      StorageType: !If [ShouldAllocateStorageType, !Ref StorageType, !Ref "AWS::NoValue"]
+      # Allocated storage for the RDS cluster
+      AllocatedStorage: !If [ShouldAllocateStorage, !Ref RdsStorage, !Ref "AWS::NoValue"]
+      # Provisioned IOPS for the RDS cluster
+      Iops: !If [ShouldAllocateIops, !Ref Iops, !Ref "AWS::NoValue"]
+      # Instance class for the RDS cluster
+      DBClusterInstanceClass: !If [ShouldAllocateDbClusterInstanceClass, !Ref DbClusterInstanceClass, !Ref "AWS::NoValue"]
+      # Specifies if the RDS cluster is publicly accessible (only for mysql and postgres engines)
+      {% if engine_type == "mysql" or engine_type == "postgres" -%}
+      PubliclyAccessible: !If [ShouldEnablePublicAccess, true, false]
+      {% endif %}
+      # If ParameterGroup is null, use DbParameterFamily; otherwise, set to AWS::NoValue
+      DBParameterGroupFamily: !If [IsNullDbParameterGroup, !Ref DbParameterFamily, !Ref "AWS::NoValue"]
+      # Port for the RDS cluster based on the engine type
+      Port: !If
+        - IsAuroraPostgreSQL
+        - 5432  # Aurora PostgreSQL uses port 5432
+        - !If
+          - IsAuroraMySQL
+          - 3306  # Aurora MySQL uses port 3306
+          - !If
+            - IsPostgreSQL
+            - 5432  # PostgreSQL uses port 5432
+            - 3306  # MySQL uses port 3306
+      # Enable CloudWatch logs exports for the RDS cluster based on the engine type
+      EnableCloudwatchLogsExports: !If
+        - ShouldUseCloudWatchLogs
+        - !If
+          - IsAuroraPostgreSQL
+          - ["postgresql"]
+          - !If
+            - IsPostgreSQL
+            - ["postgresql", "upgrade"]
+            - !If
+              - IsAuroraMySQL
+              - ["audit", "error", "general", "slowquery"]
+              - !If
+                - IsMySQL
+                - ["audit", "error", "general", "slowquery"]
+                - []
+        - !Ref "AWS::NoValue"
+      # Scaling configuration for storage auto-scaling
+      ScalingConfiguration:
+        !If
+          - EnableStorageAutoscalingCondition
+          - AutoPause: true
+            MinCapacity: 100
+            MaxCapacity: 1000
+            SecondsUntilAutoPause: 300
+            TimeoutAction: ForceApplyCapacityChange
+          - !Ref AWS::NoValue
+
+  # RDS Cluster Instance One resource definition (for Aurora clusters)
+  RdsClusterInstanceOne:
+    Type: "AWS::RDS::DBInstance"
+    Condition: IsAurora
+    Properties:
+      # Engine type for the RDS instance
+      Engine: !Ref EngineType
+      # DB parameter group for the RDS instance
+      DBParameterGroupName: !If [ShouldUseDbParameterGroup, !If [IsNullDbParameterGroup, !Ref ParameterGroupNew, !Ref ParameterGroup], !Ref "AWS::NoValue"]
+      # DB instance identifier for RDS instance one
+      DBInstanceIdentifier: !Sub "${RdsClusterIdentifier}-instance-one"
+      # Instance class for RDS instance one (custom or default)
+      DBInstanceClass: !If
+        - IsCustomDbInstanceOne
+        - !Ref DbInstanceOneCustom
+        - !Ref DbInstanceClass
+      # DBClusterIdentifier of the RDS cluster
+      DBClusterIdentifier: !Ref RdsCluster
+      # Engine version for the RDS instance
+      EngineVersion: !Ref EngineVersion
+      PubliclyAccessible: !If [ShouldEnablePublicAccess, true, false]
+      # Tags for the RDS instance
+      Tags:
+        - Key: Name
+          Value: !Sub "${RdsClusterIdentifier}-instance-one"
+
+  # RDS Cluster Instance Two resource definition (for Aurora clusters)
+  RdsClusterInstanceTwo:
+    Type: "AWS::RDS::DBInstance"
+    Condition: IsAurora
+    Properties:
+      # Engine type for the RDS instance
+      Engine: !Ref EngineType
+      # DB parameter group for the RDS instance
+      DBParameterGroupName: !If [ShouldUseDbParameterGroup, !If [IsNullDbParameterGroup, !Ref ParameterGroupNew, !Ref ParameterGroup], !Ref "AWS::NoValue"]
+      # DB instance identifier for RDS instance two
+      DBInstanceIdentifier: !Sub "${RdsClusterIdentifier}-instance-two"
+      # Instance class for RDS instance two (custom or default)
+      DBInstanceClass: !If
+        - IsCustomDbInstanceTwo
+        - !Ref DbInstanceTwoCustom
+        - !Ref DbInstanceClass
+      # DBClusterIdentifier of the RDS cluster
+      DBClusterIdentifier: !Ref RdsCluster
+      # Engine version for the RDS instance
+      EngineVersion: !Ref EngineVersion
+      PubliclyAccessible: !If [ShouldEnablePublicAccess, true, false]
+      # Tags for the RDS instance
+      Tags:
+        - Key: Name
+          Value: !Sub "${RdsClusterIdentifier}-instance-two"
+
+  # RDS Cluster Instance Three resource definition (for Aurora clusters)
+  RdsClusterInstanceThree:
+    Type: "AWS::RDS::DBInstance"
+    Condition: IsAurora
+    Properties:
+      # Engine type for the RDS instance
+      Engine: !Ref EngineType
+      # DB parameter group for the RDS instance
+      DBParameterGroupName: !If [ShouldUseDbParameterGroup, !If [IsNullDbParameterGroup, !Ref ParameterGroupNew, !Ref ParameterGroup], !Ref "AWS::NoValue"]
+      # DB instance identifier for RDS instance three
+      DBInstanceIdentifier: !Sub "${RdsClusterIdentifier}-instance-three"
+      # Instance class for RDS instance three (custom or default)
+      DBInstanceClass: !If
+        - IsCustomDbInstanceThree
+        - !Ref DbInstanceThreeCustom
+        - !Ref DbInstanceClass
+      # DBClusterIdentifier of the RDS cluster
+      DBClusterIdentifier: !Ref RdsCluster
+      # Engine version for the RDS instance
+      EngineVersion: !Ref EngineVersion
+      PubliclyAccessible: !If [ShouldEnablePublicAccess, true, false]
+      # Tags for the RDS instance
+      Tags:
+        - Key: Name
+          Value: !Sub "${RdsClusterIdentifier}-instance-three"
+
+  # Security group ingress rule to allow public access to the RDS cluster (for MySQL and PostgreSQL engines)
+  RdsClusterSecurityGroupIngress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Condition: ShouldEnablePublicAccess
+    Properties:
+      # Security group ID for the RDS cluster
+      GroupId: !Ref SecurityGroupId
+      IpProtocol: tcp # IP protocol (TCP)
+      FromPort: # Port to allow access to (3306 for MySQL, 5432 for PostgreSQL)
+        Fn::If:
+          - IsMySQLOrAuroraMySQL
+          - 3306  # MySQL and Aurora MySQL use the same port
+          - 5432  # PostgreSQL and Aurora PostgreSQL use the same port
+      ToPort: # Port to allow access to (3306 for MySQL, 5432 for PostgreSQL)
+        Fn::If:
+          - IsMySQLOrAuroraMySQL
+          - 3306  # MySQL and Aurora MySQL use the same port
+          - 5432  # PostgreSQL and Aurora PostgreSQL use the same port
+      CidrIp: 0.0.0.0/0 # CIDR IP range to allow access from (0.0.0.0/0 allows public access)

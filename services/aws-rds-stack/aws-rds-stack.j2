@@ -1,0 +1,469 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: RDS for MySQL and PostgreSQL
+
+Parameters:
+  StackName:
+    Type: String
+    Default: "{{ stack_name }}"
+  Env:
+    Type: String
+    Default: "{{ environment }}"
+  VPCCIDR:
+    Type: String
+    Default: "{{ vpc_cidr_range }}"
+  PublicSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ public_subnets | join (', ') }}"
+  PrivateSubnetCIDRs:
+    Type: CommaDelimitedList
+    Default: "{{ private_subnets | join (', ') }}"
+  InstanceType:
+    Description: The type of instance to start
+    Type: String
+    Default: "{{ instance_type }}"
+  AmiId:
+    Description: Bastion host AMI ID
+    Type: String
+    Default: "{{ ami_id }}"
+  LinuxDeviceName:
+    Description: AWS EBS device names for Linux instances
+    Type: String
+    Default: /dev/sdb
+  KeyPair:
+    Description: Key name of the Key Pair to use for the instance
+    Type: String
+    Default: {{ key_pair }}
+  VolumeSizes:
+    Description: Volume sizes to be attached to the launch template
+    Type: String
+    Default: "{{ volume_size }}"
+  VolumeType:
+    Description: Volume sizes to be attached to the launch template
+    Type: String
+    Default: "{{ volume_type }}"
+
+## ASG ##
+  MinimumSize:
+    Description: The minimum number of instances in the Auto Scaling group
+    Type: Number
+    Default: "{{ asg_min_size }}"
+  MaximumSize:
+    Description: The maximum number of instances in the Auto Scaling group
+    Type: Number
+    Default: "{{ asg_max_size }}"
+  DesiredCapacity:
+    Description: The desired capacity of the Auto Scaling group
+    Type: Number
+    Default: "{{ asg_desired_capacity }}"
+
+  # RDS 
+  RdsIdentifier:
+    Description: The name of your DB instance
+    Type: String
+    Default: "{{ rds_identifier }}"
+
+  EngineType:
+    Description: Choose the engine type
+    Type: String
+    Default: "{{ engine_type }}"
+
+  EngineVersion:
+    Description: Choose the engine version
+    Type: String
+    Default: "{{ engine_version }}"
+
+  DbMasterUsername:
+    Description: DB master username
+    Type: String
+    Default: "{{ db_master_username }}"
+
+  DbMasterPassword:
+    Description: DB master password
+    Type: String
+    Default: "{{ db_master_password }}"
+    NoEcho: true
+
+  DbInstanceClass:
+    Description: DB instance class
+    Type: String
+    Default: "{{ db_instance_class }}"
+
+  RdsStorage:
+    Description: RDS storage
+    Type: Number
+    Default: "{{ rds_storage }}"
+
+  LogExports:
+    Type: String
+    Description: Select 'yes' if you need to export logs to CloudWatch
+    Default: "{{ log_exports }}"
+
+  Endpoint:
+    Type: CommaDelimitedList
+    Description: Email address to receive notifications via SNS
+    Default: "{{ email_address | join (', ') }}"
+
+Conditions:
+  IsMySQL: !Equals [!Ref EngineType, "mysql"]
+  IsPostgreSQL: !Equals [!Ref EngineType, "postgres"]
+  IsLogExportEnabled: !Equals [!Ref LogExports, 'yes']
+  
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-vpc'
+
+  # Our VPC will need internet access:
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-igw'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+## Public Subnets ##
+  {% for i in public_subnets %}
+  PublicSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PublicSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-public-subnet-{{ loop.index }}'
+
+  PublicRouteTableAssociation{{ loop.index }}:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: !Ref PublicSubnet{{ loop.index }}
+        RouteTableId: !Ref PublicRouteTable
+  {% endfor %}
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn:
+       - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-public-route-table'
+        
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+       - PublicRouteTable
+       - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+## Nat Eip Creation for Public Subnets ##
+{% for i in public_subnets %}
+  NatEIP{{ loop.index }}:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-nat-eip-{{ loop.index }}'
+
+  NatGateway{{ loop.index }}:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref PublicSubnet{{ loop.index }}
+      AllocationId: !GetAtt NatEIP{{ loop.index }}.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-natgateway-{{ loop.index }}'
+   
+{% endfor %}
+
+## Private Subnetes ##
+  {% for i in private_subnets %}
+  PrivateSubnet{{ loop.index }}:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [ {{ loop.index - 1 }}, !Ref PrivateSubnetCIDRs ]
+      AvailabilityZone: !Select [ {{ loop.index - 1 }}, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-private-subnet-{{ loop.index }}'
+       
+  PrivateRouteTable{{ loop.index }}:
+    Type: AWS::EC2::RouteTable  
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-private-route-table-{{ loop.index }}'
+      
+  PrivateRoute{{ loop.index }}:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - NatGateway{{ loop.index }}  
+      - PrivateRouteTable{{ loop.index }}
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway{{ loop.index }}
+  PrivateRouteTableAssociation{{ loop.index }}:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet{{ loop.index }}
+      RouteTableId: !Ref PrivateRouteTable{{ loop.index }}
+  {% endfor %}
+
+## Instance Profile Creation ##
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub '${Env}-${StackName}-policy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: '*'
+                Resource: '*'
+
+  IamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${Env}-${StackName}-instance-profile'
+      Roles:
+        - !Ref Role
+
+## Security Groups For Launch Template ##
+  LaunchTemplateSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Sub '${Env}-${StackName}-lt-sg'
+      GroupDescription: launch-Template-security-group
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+
+
+## Launch Template ##
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn:
+      - LaunchTemplateSecurityGroup
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-launch-template'
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPair
+        SecurityGroupIds:
+          - !Ref LaunchTemplateSecurityGroup
+        IamInstanceProfile:
+          Name: !Ref IamInstanceProfile
+        BlockDeviceMappings:
+          - DeviceName: !Ref LinuxDeviceName
+            Ebs:
+              VolumeSize: !Ref VolumeSizes
+              VolumeType: !Ref VolumeType
+
+## Autoscaling Group Public ##
+  PublicAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${AWS::StackName}-public'
+      VPCZoneIdentifier:
+        {% for i in public_subnets -%}
+        - !Ref PublicSubnet{{ loop.index }}  
+        {% endfor %} 
+
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: 1
+      MinSize: !Ref MinimumSize
+      MaxSize: !Ref MaximumSize
+      DesiredCapacity: !Ref DesiredCapacity
+
+## RDS ##
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub '${Env}-${StackName}-DBSubnetGroup'
+      DBSubnetGroupDescription: DB Subnet Group
+      SubnetIds:
+        {% for i in private_subnets %}
+        - !Ref PrivateSubnet{{ loop.index }}  # Add the reference to PublicSubnet1
+        {% endfor %}
+
+  # Security group for the RDS
+  RDSSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupName: !Sub '${Env}-${StackName}-rds-sg'
+      GroupDescription: RDS-security-group
+      VpcId: !Ref VPC
+
+  RDSSecurityGroupIngress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: !If [IsMySQL, 3306, !If [IsPostgreSQL, 5432, -1]]
+      ToPort: !If [IsMySQL, 3306, !If [IsPostgreSQL, 5432, -1]]
+      CidrIp: 0.0.0.0/0
+
+
+  RDSPrimaryDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Ref RdsIdentifier
+      Engine: !Ref EngineType
+      DBInstanceClass: !Ref DbInstanceClass
+      MasterUsername: !Ref DbMasterUsername
+      MasterUserPassword: !Ref DbMasterPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "03:00-04:00"
+      PreferredMaintenanceWindow: "mon:04:00-mon:04:30"
+      MultiAZ: true
+      StorageEncrypted: true
+      AllocatedStorage: !Ref RdsStorage
+      EnableCloudwatchLogsExports: !If [IsLogExportEnabled,
+        !If [IsPostgreSQL, ['alert', 'audit', 'listener', 'trace'], !Ref 'AWS::NoValue'], !Ref 'AWS::NoValue']
+      CopyTagsToSnapshot: true
+      KmsKeyId: !GetAtt KMSKey.Arn
+
+  ## RDS instance - Write Replica ##
+  RDSWriteReplicaDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      DBInstanceClass: !Ref DbInstanceClass 
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      SourceDBInstanceIdentifier: !Ref RDSPrimaryDB
+      MultiAZ: true 
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "03:00-04:00"
+      PreferredMaintenanceWindow: "mon:04:00-mon:04:30"
+      StorageEncrypted: true
+      EnableCloudwatchLogsExports: !If [IsLogExportEnabled,
+        !If [IsPostgreSQL, ['alert', 'audit', 'listener', 'trace'], !Ref 'AWS::NoValue'], !Ref 'AWS::NoValue']
+      CopyTagsToSnapshot: true
+
+  ## RDS instance - Read Replica ##
+  RDSReadReplicaDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      DBInstanceClass: !Ref DbInstanceClass 
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      SourceDBInstanceIdentifier: !Ref RDSPrimaryDB
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "03:00-04:00"
+      PreferredMaintenanceWindow: "mon:04:00-mon:04:30"
+      MultiAZ: true  # This will create a standby read replica in the second AZ
+      StorageEncrypted: true
+      AllocatedStorage: !Ref RdsStorage
+
+      EnableCloudwatchLogsExports: !If [
+        IsLogExportEnabled,
+        !If [
+          IsPostgreSQL,
+          ["postgresql", "upgrade"],
+          !If [
+            IsMySQL,
+            ["audit", "error", "general", "slowquery"],
+            !Ref "AWS::NoValue"
+          ]
+        ],
+        !Ref "AWS::NoValue"
+      ]
+      CopyTagsToSnapshot: true
+
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: !Sub '${Env}-${StackName}-sns-aws-rds-stack'
+      TopicName: !Sub '${Env}-${StackName}-aws-rds-stack'
+      KmsMasterKeyId: !Ref KMSKey
+     
+  # New SNS Subscription Resource
+  {% for i in email_address %}
+  SNSSubscription{{ loop.index }}:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !Select [ {{ loop.index - 1 }}, !Ref Endpoint ]
+      Protocol: "email"
+      TopicArn: !Ref SNSTopic
+  {% endfor %}
+
+  RDSEventSubscription:
+    Type: AWS::RDS::EventSubscription
+    Properties:
+      SourceType: db-instance
+      EventCategories:
+        - availability
+        - deletion
+        - failover
+        - failure
+        - low storage
+        - maintenance
+        - notification
+        - read replica
+        - recovery
+        - restoration
+      SnsTopicArn: !Ref SNSTopic
+
+  RDSCloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/rds/instance/my-rds-instance/loggroup
+      RetentionInDays: 7
+
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: RDS Encryption Key
+      KeyUsage: ENCRYPT_DECRYPT
+      Enabled: true
+      EnableKeyRotation: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Env}-${StackName}-RDS-Encryption-Key'
+
+  KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/RDS-Encryption-Key
+      TargetKeyId: !Ref KMSKey

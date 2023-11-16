@@ -11,8 +11,8 @@ Parameters:
     Description: The NLB or ALB.
     Default: "{{ loadbalancer_type }}"
     AllowedValues:
-      - Application_Load_Balancer
-      - Network_Load_Balancer
+      - application
+      - network
   Actions:
     Type: String
     Description: Choose the action.
@@ -40,7 +40,7 @@ Parameters:
     Description: AWS environment.
     Default: "{{ environment }}"
   SecurityGroupId:
-    Type: List<AWS::EC2::SecurityGroup::Id>
+    Type: CommaDelimitedList
     Description: The ID of the security group for the ELB.
     Default: "{{ security_group_id }}"
   VpcId:
@@ -56,9 +56,9 @@ Parameters:
     Description: ARN of the target group.
     Default: "{{ target_group_arn }}"
   Port:
-    Type: String
+    Type: Number
     Description: Mention the port number.
-    Default: "{{ port }}"
+    Default: {{ port }}
   Protocol:
     Type: String
     Description: Select the protocol to use.
@@ -68,6 +68,7 @@ Parameters:
       - HTTPS
       - TCP
       - UDP
+      - TLS
   CertificateList:
     Type: String
     Description: A list of SSL/TLS certificates.
@@ -76,8 +77,29 @@ Parameters:
     Type: String
     Description: The security policy for SSL/TLS connections.
     Default: "{{ security_policy }}"
+  ALPNPolicy:
+    Type: CommaDelimitedList
+    Description: List of ALPN protocols for TLS connections.
+    Default: "{{alpn_policy}}"
+
 Conditions:
-  Use_Application_Load_Balancer: !Equals [!Ref LoadBalancerType, Application_Load_Balancer]
+  UseApplicationLoadBalancer:
+    Fn::And:
+       - !Equals [!Ref LoadBalancerType, "application"]
+       - !Not [!Equals [!Ref Protocol, "HTTPS"]]
+  ApplicationLoadbalancerHTTPS:
+    Fn::And:
+       - !Equals [!Ref LoadBalancerType, "application"]
+       - !Equals [!Ref Protocol, "HTTPS"]
+  UseNetworkLoadBalancer:
+    Fn::And:
+      - !Equals [!Ref LoadBalancerType, "network"]
+      - !Not [!Equals [!Ref Protocol, "TLS" ]]
+  NetworkLoadBalancerTLS:
+    Fn::And:
+      - !Equals [!Ref LoadBalancerType, "network"]
+      - !Equals [!Ref Protocol, "TLS"]
+
 
 Resources:
   LoadBalancer:
@@ -85,27 +107,57 @@ Resources:
     Properties:
       Name: !Ref LoadBalancerName
       Scheme: !Ref LoadBalancerScheme
-      Type: !If
-        - Use_Application_Load_Balancer
-        - application
-        - !Ref LoadBalancerType
+      Type: !Ref LoadBalancerType
       IpAddressType: !Ref IpAddressType
       Subnets: !Ref SubnetList
-      {% if protocol == "HTTPS" %}
       SecurityGroups: !Ref SecurityGroupId
-      {% endif %}
 
-  Listener:
+  ALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UseApplicationLoadBalancer
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
       Port: !Ref Port
       Protocol: !Ref Protocol
-      {% if protocol == "HTTPS" %}
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupArn
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: ApplicationLoadbalancerHTTPS
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: !Ref Port
+      Protocol: !Ref Protocol
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupArn
       SslPolicy: !Ref SecurityPolicy
       Certificates:
         - CertificateArn: !Ref CertificateList
-      {% endif %}
+
+  NLBListenerTLS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: NetworkLoadBalancerTLS
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: !Ref Port
+      Protocol: !Ref Protocol
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupArn
+      SslPolicy: !Ref SecurityPolicy
+      Certificates:
+        - CertificateArn: !Ref CertificateList
+      AlpnPolicy: !Ref ALPNPolicy
+
+  NLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UseNetworkLoadBalancer
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: !Ref Port
+      Protocol: !Ref Protocol
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TargetGroupArn
