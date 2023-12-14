@@ -1,5 +1,16 @@
 # AWS Fintech Infrastructure on AWS
 
+## Description
+![Image](./aws-fintech.png)
+The architecture provides a robust and scalable environment with high availability, security, and monitoring capabilities. It follows best practices to ensure a well-architected AWS infrastructure that can handle your application’s demands while maintaining your data's confidentiality, integrity, and availability. It's for companies that want to manage their business-to-business (B2B) or business-to-consumer (B2C) fintech software in the cloud.
+FinTech Blueprint on AWS using Infrastructure as Code is a collaborative tool that involves various roles throughout the software development and deployment lifecycle in the financial technology sector. It facilitates consistency, scalability, and security in the deployment of FinTech applications and services on the AWS cloud.
+- Who can use Fintech Blueprint on AWS
+    - Developers working in the FinTech domain can leverage the blueprint to deploy and scale applications that handle financial transactions, data analytics, risk management, or other financial services on AWS.
+    - DevOps engineers play a crucial role in automating infrastructure deployment and management. They can use the IaC blueprint to define and provision AWS resources, set up CI/CD pipelines, and manage configurations for FinTech applications.
+    - System architects design the overall architecture of FinTech applications, ensuring scalability, security, and compliance. They can use IaC to model the infrastructure components, allowing for consistent and repeatable deployments.
+    - Professionals working with financial data analytics can benefit from the blueprint's ability to provision scalable and performant AWS resources for processing and analyzing financial data.
+    - Professionals responsible for regulatory compliance in the financial sector can benefit from the IaC blueprint by ensuring that the infrastructure configurations align with industry regulations and standards.
+
 ## Overview
 - This is a Jinja templates for deploying AWS fintech infrastructure on AWS using CloudFormation . The infrastructure contains 3 VPC , VPC peering, NAT gateway , AWS Client VPN and AWS Config rules.
 

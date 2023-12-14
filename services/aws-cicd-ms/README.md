@@ -1,4 +1,17 @@
 # AWS DevOps Pipeline architecture - CI/CD for Nodejs backend application
+
+## Description
+![Image](./aws-cicd-ms.png)
+AWS DevOps pipeline architecture -ci/cd for nodejs backend application , with this end user will be able to deploy nodejs backend application . The architecture provides a robust and scalable environment with high availability, security, and monitoring capabilities. It follows best practices to ensure a well-architected AWS infrastructure that can handle your application’s demands while maintaining your data's confidentiality, integrity, and availability.
+The goal is to create the pipeline which creates the below-given architecture which includes AWS code pipeline with stages (source stage, build stage ), and SNS notification.
+- Who can use AWS DevOps pipeline architecture - CI/CD for Nodejs backend application:
+    - Developers responsible for writing Node.js backend code can use the CI/CD pipeline to automate the building, testing, and deployment of their applications. They can focus on coding while relying on the automated pipeline to handle the deployment process.
+    - DevOps engineers are instrumental in designing and implementing CI/CD pipelines. They can leverage this blueprint to create an efficient and automated deployment process for Node.js applications, ensuring consistency and speed in releases
+    - Infrastructure engineers may collaborate on the Infrastructure as Code (IaC) components of the blueprint, ensuring that the AWS infrastructure supporting the Node.js application is defined, versioned, and managed as code.
+    - Release managers can orchestrate the release process using the CI/CD pipeline, ensuring that the correct version of the Node.js application is deployed to production and other environments.
+    - QA teams can leverage the CI/CD pipeline to automatically deploy different versions of the Node.js application for testing. Automated testing steps integrated into the pipeline ensure the quality of the deployed code.
+    - Can be utilized by companies of various sizes and industries such as Technology, E-commerce, Financial, Healthcare and Life Sciences companies etc that develop and deploy Node.js applications for backend services. Many organizations across various sectors can benefit from implementing a robust CI/CD pipeline for Node.js applications on AWS.
+    
 ## Overview
 -  This is a Jinja templates for deploying AWS devops pipeline architecture for Static website on AWS using AWS CodePipeline, S3 bucket for atifacts,AWS SNS for Notifications and IAM Roles and policies  with AWS CloudFormation.
 ## Parameters 

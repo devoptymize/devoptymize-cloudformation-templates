@@ -1,4 +1,17 @@
 # 3-Tier Infrastructure on AWS
+
+## Description
+![Image](./aws-3t-arch.png)
+Three-Tier Application Architecture IaC blueprint is a valuable tool for a cross-functional team involved in the development, deployment, and maintenance of a three-tier application on a cloud platform.
+Resources used here are the network layer, launch template, auto-scaling group, load balancer, RDS, WAF, CloudFront, and route53.The end user should be able to deploy a refined 3-tier web application architecture into AWS with the help of Jenkins pipeline using CFT / IaC.
+- Who can use Three-Tier Application Architecture:
+    - Cloud architects can utilize the IaC blueprint to define and provision the infrastructure components required for the three-tier application on a cloud platform. This includes setting up virtual machines, networking, and other cloud services
+    - Infrastructure engineers are responsible for designing and maintaining the underlying infrastructure.
+    - DevOps engineers play a key role in automating the deployment pipeline. They can integrate the IaC blueprint into continuous integration/continuous deployment (CI/CD) workflows, ensuring consistent and repeatable infrastructure deployments.
+    - System administrators are involved in managing and maintaining the servers and services in each tier. They can benefit from the IaC blueprint by having a standardized and automated way to deploy and configure infrastructure components.
+    - Developers can leverage the IaC blueprint to define infrastructure requirements alongside application code. This allows for a more collaborative approach between development and operations, often referred to as DevOps
+    - Cloud administrators, who focus on managing cloud resources and services, can utilize the IaC blueprint to automate the provisioning and configuration of cloud-specific components in the three-tier application.
+    
 ## Overview
 - This is a Jinja templates for creating the resources like AWS using Amazon Virtual Private Cloud (Amazon VPC), Amazon Elastic Compute Cloud (Amazon EC2), Auto Scaling, Elastic Load Balancing (Application Load Balancer), Amazon Relational Database Service (Amazon RDS), Amazon CloudFront, Amazon Route 53, Amazon Certificate Manager (Amazon ACM) with AWS CloudFormation.
 - This AWS CloudFormation template is designed to create a 3-tier stack. The stack consists of multiple components, including Amazon Virtual Private Cloud (Amazon VPC), Amazon Elastic Compute Cloud (Amazon EC2), Auto Scaling, Elastic Load Balancing (Application Load Balancer), Amazon Relational Database Service (Amazon RDS), Amazon ElastiCache, Amazon Elastic File System (Amazon EFS), Amazon CloudFront, Amazon Route 53 and Amazon Certificate Manager (Amazon ACM). This template is designed to be customizable with various parameters to adapt to different environments and use cases.
